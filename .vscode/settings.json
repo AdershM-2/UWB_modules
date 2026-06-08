@@ -1,0 +1,6 @@
+{
+    "arduino.analyzeOnOpen": false,
+    "arduino.analyzeOnSettingChange": false,
+    "arduino.disableTestingOpen": true,
+    "arduino.logLevel": "warn"
+}

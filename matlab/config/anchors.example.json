@@ -1,0 +1,10 @@
+{
+  "_comment": "Anchor geometry for the MATLAB host. Copy to anchors.json and edit. THIS is the only place anchors are added - the firmware never changes. id = anchor short address (decimal) matching ANCHOR_ID in Anchor.ino. Coordinates in metres. For 2D set dim=2 (z ignored). bounds = [xmin xmax ymin ymax zmin zmax] for the plot.",
+  "dim": 2,
+  "bounds": [-0.5, 4.5, -0.5, 4.5, 0.0, 3.0],
+  "anchors": [
+    { "id": 1, "x": 0.00, "y": 0.00, "z": 1.50 },
+    { "id": 2, "x": 4.00, "y": 0.00, "z": 1.50 },
+    { "id": 3, "x": 2.00, "y": 4.00, "z": 1.50 }
+  ]
+}

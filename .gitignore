@@ -1,0 +1,37 @@
+# ── MATLAB ───────────────────────────────────────────────────────────────────
+# Session range/position logs (large, ephemeral)
+matlab/rtls_log_*.csv
+*.asv
+*.mex*
+slprj/
+
+# ── LaTeX build artefacts ────────────────────────────────────────────────────
+docs/*.aux
+docs/*.log
+docs/*.out
+docs/*.toc
+docs/*.fls
+docs/*.fdb_latexmk
+docs/*.synctex.gz
+docs/*.bbl
+docs/*.blg
+
+# ── Arduino / PlatformIO ─────────────────────────────────────────────────────
+.pio/
+.pioenvs/
+.piolibdeps/
+build/
+*.elf
+*.bin
+*.hex
+*.map
+
+# ── OS / editor ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+
+# ── Claude Code internal ──────────────────────────────────────────────────────
+.claude/

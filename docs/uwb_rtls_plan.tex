@@ -1,0 +1,585 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{geometry}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{longtable}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{parskip}
+\usepackage{amssymb}
+\usepackage{tcolorbox}
+\usepackage{fontawesome5}
+\tcbuselibrary{skins,breakable}
+
+%% ---- Math shorthands -------------------------------------------------------
+\newcommand{\mat}[1]{\mathbf{#1}}
+\newcommand{\vect}[1]{\mathbf{#1}}
+
+%% ---- Section-title helpers (safe in bookmarks via texorpdfstring) -----------
+\newcommand{\dif}[1]{\texorpdfstring{\hfill#1}{}}
+\newcommand{\novel}{\texorpdfstring{\quad\textcolor{dkred}{$\star$~\textbf{Novel}}}{[Novel]}}
+
+\geometry{top=2.5cm,bottom=2.5cm,left=2.5cm,right=2.5cm}
+
+%% ---- Colours ----------------------------------------------------------------
+\definecolor{dkblue}{RGB}{0,70,130}
+\definecolor{dkgreen}{RGB}{0,110,50}
+\definecolor{dkred}{RGB}{160,0,0}
+\definecolor{dkorange}{RGB}{180,80,0}
+\definecolor{lightblue}{RGB}{232,244,255}
+\definecolor{lightgreen}{RGB}{232,255,238}
+\definecolor{lightyellow}{RGB}{255,252,220}
+\definecolor{lightred}{RGB}{255,235,235}
+\definecolor{lightgray}{RGB}{248,248,248}
+\definecolor{midgray}{RGB}{120,120,120}
+
+%% ---- Section styling --------------------------------------------------------
+\titleformat{\section}{\large\bfseries\color{dkblue}}{\thesection}{1em}{}[\color{dkblue}\titlerule]
+\titleformat{\subsection}{\normalsize\bfseries\color{dkblue}}{\thesubsection}{1em}{}
+\titleformat{\subsubsection}{\normalsize\bfseries\color{dkgreen}}{\thesubsubsection}{0.8em}{}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{midgray}UWB RTLS --- Improvement Plan Rev\,2}
+\fancyhead[R]{\small\color{midgray}\leftmark}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+%% ---- Custom boxes -----------------------------------------------------------
+\newtcolorbox{donebox}{
+  enhanced,breakable,colback=lightgreen,colframe=dkgreen,
+  boxrule=0.5pt,arc=3pt,left=6pt,right=6pt
+}
+\newtcolorbox{phasebox}[1][Phase]{
+  enhanced,breakable,colback=lightblue,colframe=dkblue,
+  boxrule=0.5pt,arc=3pt,left=6pt,right=6pt,
+  title=\textbf{#1},fonttitle=\small\color{dkblue},
+  attach boxed title to top left={yshift=-2mm,xshift=4mm},
+  boxed title style={colback=white,colframe=dkblue}
+}
+\newtcolorbox{claimbox}{
+  enhanced,breakable,colback=lightyellow,colframe=dkorange,
+  boxrule=0.5pt,arc=3pt,left=6pt,right=6pt
+}
+\newtcolorbox{warnbox}{
+  enhanced,breakable,colback=lightred,colframe=dkred,
+  boxrule=0.5pt,arc=3pt,left=6pt,right=6pt
+}
+
+%% ---- Difficulty badge -------------------------------------------------------
+\newcommand{\easy}{\textcolor{dkgreen}{\textbf{Easy}}}
+\newcommand{\medium}{\textcolor{dkorange}{\textbf{Medium}}}
+\newcommand{\medhard}{\textcolor{dkorange}{\textbf{Med-Hard}}}
+\newcommand{\hard}{\textcolor{dkred}{\textbf{Hard}}}
+\newcommand{\vhard}{\textcolor{dkred}{\textbf{Very Hard}}}
+\newcommand{\done}{\texorpdfstring{\textcolor{dkgreen}{$\checkmark$~\textbf{Done}}}{[Done]}}
+
+%% =============================================================================
+\begin{document}
+%% =============================================================================
+
+\begin{titlepage}
+  \centering\vspace*{2cm}
+  {\color{dkblue}\rule{\linewidth}{2pt}}\\[0.5cm]
+  {\huge\bfseries UWB RTLS --- Full Improvement Plan\\[0.3cm]
+   \large Revision 2 \quad|\quad June 2026}\\[0.4cm]
+  {\color{dkblue}\rule{\linewidth}{2pt}}\\[1.5cm]
+  \begin{tabular}{ll}
+    \textbf{Hardware}      & 4$\times$ Makerfabs ESP32 UWB Pro with Display (DW1000) \\
+    \textbf{Configuration} & 3 anchors + 1 tag (extendable) \\
+    \textbf{Goal}          & XYZ + RPY indoor positioning, no cameras, microcontroller-level \\
+    \textbf{Current state} & 3--10\,cm XY accuracy, 2D only, no NLOS detection, no IMU \\
+    \textbf{Target}        & $\leq$3\,cm XY, $\leq$5\,cm Z, $\leq$5$^\circ$ RPY \\
+  \end{tabular}
+  \vfill
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+%% =============================================================================
+\section{Context and System Summary}
+%% =============================================================================
+
+The system uses Ultra-Wideband (UWB) radio time-of-flight ranging to locate a mobile tag relative to fixed anchors. The DW1000 chip achieves 15.65\,ps timestamp resolution (4.7\,mm per tick), giving a theoretical 1--2\,cm floor in LOS conditions. Current performance of 3--10\,cm is dominated by calibration errors, uncorrected multipath bias, and the absence of NLOS detection. This plan describes how to close that gap in six phases.
+
+All position computation runs on the host PC (MATLAB). The tag firmware streams raw distances; no algorithm changes are required on the microcontroller to add more anchors or change the estimator.
+
+%% =============================================================================
+\section{Existing Library Comparison}
+%% =============================================================================
+
+\subsection{Capability Matrix}
+
+\begin{table}[ht]
+\centering
+\caption{Open-source DW1000 library capability comparison (verified against current source, June 2026)}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{lcccccc}
+\toprule
+\textbf{Capability} & \textbf{thotro} & \textbf{Makerfabs} & \textbf{jremington} & \textbf{pizzo00} & \textbf{dw1000-ng} & \textbf{UwbRtls (ours)} \\
+\midrule
+Anchor ceiling       & 4         & 4         & 4$^\dagger$ & 6         & No limit$^\ddagger$ & \textbf{No limit} \\
+RF collisions        & Yes       & Yes       & Yes         & Yes       & No            & \textbf{No} \\
+Update rate          & 0.6\,Hz   & 0.6\,Hz   & 0.6\,Hz     & 1\,Hz     & 2\,Hz          & \textbf{3+\,Hz} \\
+Multi-tag            & No        & No        & No          & Partial   & No             & \textbf{Designed-in} \\
+NLOS detection       & No        & No        & No          & No        & No             & \textbf{Planned (2.1)} \\
+IMU fusion           & No        & No        & No          & No        & No             & \textbf{Planned (4.4)} \\
+3D + RPY             & No        & No        & Fragile     & No        & No             & \textbf{Planned (4.1--4.3)} \\
+Anchor self-survey   & No        & No        & No          & No        & No             & \textbf{Planned (1.5)} \\
+Actively maintained  & No (2020) & Partial   & Yes         & Yes       & No (arch.\ 2023) & \textbf{Yes} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{footnotesize}
+$^\dagger$ jremington raises \texttt{MAX\_DEVICES} to 7 but the RANGE frame encoding still overflows at 5 anchors --- see \S\ref{sec:libdetail}.\\
+$^\ddagger$ dw1000-ng uses individual unicast TWR (no shared frame), so no frame-size ceiling. Archived November 2023, single-tag only.
+\end{footnotesize}
+
+\subsection{Detailed Library Analysis}
+\label{sec:libdetail}
+
+\subsubsection{thotro/arduino-dw1000 (canonical, abandoned May 2020)}
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{4-anchor hard ceiling.} The RANGE frame packs 17 bytes per device (2-byte address + three 5-byte absolute timestamps) into a single 90-byte buffer (\texttt{LEN\_DATA = 90}). With the 9-byte MAC header: $\lfloor(90-9-2)/17\rfloor = 4$ devices. Raising \texttt{MAX\_DEVICES} past 4 causes a silent buffer overrun --- confirmed in Issue \#81. No bounds checking.
+  \item \textbf{Broadcast POLL collisions.} All anchors attempt to reply to POLL\_ACK simultaneously; only one wins per exchange, starving others.
+  \item \textbf{Volatile bug.} \texttt{\_networkDevicesNumber} not declared \texttt{volatile}; compiler may cache stale value, corrupting the device list (Issue \#179, unfixed).
+  \item \textbf{NLOS data unused.} \texttt{getFirstPathPower()} and \texttt{getReceivePower()} are implemented and stored on each device object, but \textbf{the difference is never computed, no NLOS score is derived, and no weighting or rejection logic exists}.
+\end{itemize}
+
+\subsubsection{Makerfabs mf\_DW1000}
+Thotro fork with ESP32 pin remapping. Law-of-cosines solver hardcoded for exactly 3 anchors. All thotro limitations apply unchanged.
+
+\subsubsection{jremington/UWB-Indoor-Localization\_Arduino}
+
+The repo bundles two distinct library copies:
+
+\textbf{DW1000\_library} (thotro derivative): Adds \texttt{volatile} fix to \texttt{\_networkDevicesNumber}; raises \texttt{MAX\_DEVICES} to 7. However, the RANGE frame encoding is \textbf{identical} --- still 17 bytes/device, $\lfloor79/17\rfloor = 4$ fit before overflow. Setting \texttt{MAX\_DEVICES = 7} without changing the frame is a latent buffer overrun: devices 5--7 silently corrupt memory.
+
+\textbf{DW1000\_library\_pizzo00} (Pizzolato fork, hosted here since pizzo00's original repo is deleted): Reduces per-device bytes to 12 using \textbf{differential} timestamps (\texttt{rangeDeviceSize = 12}), capping at \texttt{devicePerTransmit = 6} per frame ($\lfloor79/12\rfloor = 6$). This fixes the frame-size arithmetic for DW1000. Still uses broadcast POLL (RF collisions remain). Includes on-device LLS solver with precomputed $(A^\top A)^{-1}$ (good technique, borrowed in our Phase 6.3).
+
+\subsubsection{F-Army/arduino-dw1000-ng (archived November 2023)}
+
+\textbf{Architecture is fundamentally different}: individual unicast TWR per anchor (no shared broadcast frame). The \texttt{tagRangeInfrastructure()} function sequences anchors one at a time via a \texttt{next\_anchor} field in each anchor's confirm reply. Consequently, there is no frame-size anchor ceiling. However: single-tag only, no NLOS detection, archived and unmaintained.
+
+\begin{claimbox}
+\textbf{Corrected novelty claim on anchor scaling.} The thotro/Makerfabs/jremington lineage has a \textbf{hard 4-anchor overflow boundary} in the shared RANGE frame. The pizzo00 fork fixes the frame math to reach 6. The F-Army dw1000-ng library also has no anchor ceiling via individual unicast TWR, but is archived (2023), single-tag only, and has no NLOS detection or IMU fusion.
+
+\textbf{Our system is the first to combine:} (1) individual addressed DS-TWR with no anchor ceiling, (2) multi-tag TDMA design, (3) FP\_POWER NLOS detection, and (4) IMU fusion --- in a single open-source library.
+\end{claimbox}
+
+\subsubsection{NLOS Detection --- Verified Novelty}
+
+\begin{claimbox}
+\textbf{Confirmed: no existing open-source DW1000 positioning library uses FP\_POWER for NLOS detection.}
+
+Every audited library (thotro, Makerfabs, jremington/DW1000\_library, jremington/DW1000\_library\_pizzo00, F-Army/dw1000-ng, linorobot/ros\_dwm1000) calls \texttt{getFirstPathPower()} and \texttt{getReceivePower()} and stores both values on the device object --- but \textbf{none computes their difference, none derives an NLOS score, and none uses that score to weight or reject a measurement.}
+
+The F-Army library has an \texttt{\_nlos} boolean flag, but it controls the LDE leading-edge algorithm configuration (a static chip setting), not per-packet NLOS inference.
+
+Academic papers (e.g.\ arXiv:2403.19706) use the APS006 FP\_power metric in post-processing Python/MATLAB scripts, not in the embedded Arduino positioning library.
+
+\textbf{Our implementation of per-packet} $\Delta P_\text{NLOS} = P_\text{RX} - P_\text{FP}$ \textbf{with weighted multilateration is, to our knowledge, the first in an open-source DW1000 positioning library.}
+\end{claimbox}
+
+\subsection{Techniques Borrowed from Existing Libraries}
+
+\begin{table}[ht]
+\centering
+\caption{Techniques incorporated from existing work}
+\begin{tabular}{lll}
+\toprule
+\textbf{Source} & \textbf{Technique} & \textbf{Our phase} \\
+\midrule
+jremington & Age-gated anchor eviction (MATLAB) & Phase 0 (\done) \\
+jremington / pizzo00 & On-device LLS with precomputed $(A^\top A)^{-1}$ & Phase 6.3 \\
+pizzo00 & Differential timestamp encoding (12\,B vs 17\,B/device) & Phase 6.2 \\
+dw1000-ng & Deep sleep on anchors between ranging cycles & Phase 5.1 \\
+Nobody & FP\_POWER / RX\_POWER NLOS score \& weighting & Phase 2.1 (\textbf{novel}) \\
+Nobody & Anchor self-survey via MDS & Phase 1.5 (\textbf{novel}) \\
+Nobody & Full 6-DOF (XYZ + RPY) with UWB + IMU fusion & Phase 4 (\textbf{novel}) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%% =============================================================================
+\section{Implementation Status}
+%% =============================================================================
+
+\begin{donebox}
+\textbf{Phase 0 --- Already Complete}
+\begin{itemize}[leftmargin=2em,topsep=4pt,itemsep=2pt]
+  \item[$\checkmark$] MATLAB watchdog + UDP auto-reconnect (10\,s timeout $\to$ recreates \texttt{udpport})
+  \item[$\checkmark$] EKF divergence guard + auto-reset (jump $>$2\,m or $\mathrm{tr}(P) > 25$ triggers reinit)
+  \item[$\checkmark$] Age-gated anchor eviction in MATLAB (\texttt{AGE\_GATE\_SEC = 3.0\,s})
+  \item[$\checkmark$] \texttt{RANGE\_BIAS\_M} tuning slider (0--0.10\,m global multipath bias subtraction)
+  \item[$\checkmark$] Inner try-catch (bad sweeps skip silently, session survives)
+  \item[$\checkmark$] Status label in tuning panel (packet count, EKF resets, current bias)
+  \item[$\checkmark$] Live 5-slider tuning panel with Stationary / Slow Walk / Fast Walk presets
+\end{itemize}
+\end{donebox}
+
+%% =============================================================================
+\section{Phase 1 --- Foundation Fixes}
+%% =============================================================================
+
+\begin{phasebox}[Phase 1 --- Foundation | No algorithm changes. Highest ROI for effort.]
+Attacking calibration, protocol, and configuration issues before adding complexity.
+Expected improvement: 3--10\,cm $\to$ 2--6\,cm XY.
+\end{phasebox}
+
+\subsection{1.0 Switch to 64\,MHz PRF Accuracy Mode\dif{\easy}}
+
+\textbf{Change:} \texttt{DW1000.enableMode(MODE\_LONGDATA\_RANGE\_LOWPOWER)} $\to$ \texttt{MODE\_LONGDATA\_RANGE\_ACCURACY} in \texttt{UwbConfig.h}.
+
+\textbf{Why:} 64\,MHz PRF produces a sharper autocorrelation peak in the channel impulse response. The receiver can more reliably identify the first-path arrival and reject multipath peaks arriving slightly later. The Pro boards already have a PA/LNA amplifier for range --- this switch improves accuracy, not range.
+
+\textbf{Actions:} Reflash all 4 boards. Reduce reply delay \texttt{UWB\_REPLY\_DELAY\_US} 7000 $\to$ 6000\,µs. Re-run calibration (1.1) --- delay register values differ between PRF modes.
+
+\textbf{Removes:} 1--3\,cm systematic ranging error from multipath peak ambiguity.
+
+\subsection{1.1 Better Calibration\dif{\easy}}
+
+\textbf{Change:} \texttt{SAMPLES\_PER\_STEP} 40 $\to$ 200; \texttt{SEARCH\_ITERS} 12 $\to$ 14 in \texttt{AntennaCalibration.ino}.
+
+\textbf{Why:} 40 samples gives $\pm$1\,cm statistical uncertainty on the mean, propagating to $\pm$3 delay-register units of systematic error. 200 samples reduces this to $\pm$0.3\,cm.
+
+\textbf{Validation:} After convergence run the calibration loop for 60\,s and record mean $\pm$ std. Validate at two distances (e.g.\ 1.5\,m and 5\,m) --- both should agree within $\pm$2\,cm.
+
+\textbf{Removes:} $\pm$1--3\,cm systematic calibration bias per board.
+
+\subsection{1.2 Adaptive Polling + Age-Gated Anchor Eviction\dif{\easy}}
+
+\textbf{Firmware (remaining):} Add \texttt{failCount[N]} per anchor in \texttt{UwbScheduler}. After 3 consecutive timeouts, skip that anchor for 5 sweeps then retry with exponential backoff. This avoids wasting 100\,ms per dead anchor per sweep.
+
+\textbf{MATLAB:} \done{} --- \texttt{anchorLastSeen} struct with \texttt{tic}/\texttt{toc} tracking; \texttt{AGE\_GATE\_SEC = 3.0} evicts stale range history automatically.
+
+\subsection{1.3 Faster Sweep Rate\dif{\medium}}
+
+\textbf{Option A (safe):} Reduce \texttt{UWB\_REPLY\_DELAY\_US} 7000 $\to$ 5500\,µs. Verify exchanges still complete.
+
+\textbf{Option B (aggressive):} Switch to \texttt{MODE\_SHORTDATA\_FAST\_LOWPOWER} (6.8\,Mbps, 64-symbol preamble). Reply delay drops to $\sim$1500\,µs giving 8--10\,Hz for 3 anchors. Cost: $\sim$2\,m range reduction (acceptable for $\leq$15\,m indoor use).
+
+Higher sweep rate directly improves all filter layers downstream.
+
+\subsection{1.4 Multipath Bias Correction\dif{\done}}
+
+Global \texttt{RANGE\_BIAS\_M} subtracted from all filtered ranges before the multilaterator. Tunable 0--0.10\,m via slider. Tune by placing tag at a known point and minimising \texttt{info.rms}.
+
+\subsection{1.5 Anchor Self-Survey (Auto-Localization)\dif{\medium}}
+
+\textbf{What:} Anchors range to each other. MATLAB computes the anchor layout via Multidimensional Scaling (MDS) and writes \texttt{anchors.json} automatically. No tape measure required.
+
+\textbf{Firmware:} New sketch \texttt{examples/AnchorSurvey/AnchorSurvey.ino}. Each anchor temporarily takes the tag role and ranges to all other anchor addresses. Sends \texttt{SURVEY,v1,<src>,<dst>,<dist\_mm>,<quality>} over HostLink.
+
+\textbf{MATLAB:} New script \texttt{matlab/runSurvey.m}. Collects $\binom{N}{2}$ pairwise distances (averaged over 100 sweeps per pair). Runs classical MDS: build squared-distance matrix $D^{(2)}$, apply double-centering $B = -\tfrac{1}{2}JD^{(2)}J$, eigendecompose, take top-$d$ eigenpairs. Fix frame (anchor 1 at origin, anchor 2 on $+X$, anchor 3 in $+Y$ half-plane). Write \texttt{anchors.json}.
+
+\textbf{Accuracy:} $\approx$1--2\,cm anchor position accuracy after 100-sample averaging ($\sigma_d/\sqrt{100} \approx 0.5$\,cm per pair).
+
+\textbf{Limitation:} 3D self-survey requires meaningful height variation. All-same-height gives a degenerate $Z$ axis.
+
+%% =============================================================================
+\section{Phase 2 --- Ranging Quality}
+%% =============================================================================
+
+\begin{phasebox}[Phase 2 --- Ranging Quality | Firmware + MATLAB. Attacks measurement errors at source.]
+Expected improvement: 2--6\,cm $\to$ 1--4\,cm XY.
+\end{phasebox}
+
+\subsection{2.1 FP\_POWER NLOS Detection\dif{\medium}\novel}
+
+\textbf{What:} Read first-path amplitude registers after each DW1000 receive. Compute per-packet NLOS score per Decawave APS006. Send in RANGE\_REPORT payload. Parse and act in MATLAB.
+
+\textbf{Registers:} FP\_AMPL1, FP\_AMPL2, FP\_AMPL3 (reg 0x12, offsets 0x07--0x0C); RXPACC (reg 0x10, offset 0x2C); CIR\_PWR (reg 0x12, offset 0x00).
+
+\textbf{Math:}
+\begin{align*}
+P_\text{FP} &= 10\log_{10}\!\left(\frac{A_1^2+A_2^2+A_3^2}{N_\text{acc}^2}\right) - A_\text{const}
+\quad (A_\text{const} = 113.77\;\text{dBm at 64\,MHz PRF}) \\
+\Delta P_\text{NLOS} &= P_\text{RX} - P_\text{FP}
+\end{align*}
+
+\begin{center}
+\begin{tabular}{cll}
+\toprule
+\textbf{Score} & \textbf{Condition} & \textbf{Action} \\
+\midrule
+$<3$\,dB & LOS & Full weight \\
+3--6\,dB & Soft NLOS & Reduce weight \\
+$>6$\,dB & Hard NLOS & Strong downweight or reject \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Why it matters:} Detects NLOS before the solver runs, based on physics. Works even when consistent NLOS bias looks ``normal'' to MAD gating.
+
+\textbf{Novelty:} Confirmed by auditing all major DW1000 libraries (thotro, Makerfabs, jremington, pizzo00, dw1000-ng, linorobot). Every library exposes \texttt{getFirstPathPower()} and \texttt{getReceivePower()} but \textbf{none computes their difference, derives an NLOS score, or uses it to weight or reject measurements.}
+
+\subsection{2.2 Weighted Multilateration\dif{\medium}}
+
+Derive weights from NLOS score:
+\[
+\sigma_i = \sigma_\text{base} \cdot 10^{\Delta P_{\text{NLOS},i}/20}, \qquad w_i = 1/\sigma_i^2
+\]
+A 10\,dB NLOS anchor receives $1/100$ the weight of a clean LOS anchor. Modify Levenberg-Marquardt solver in \texttt{Multilaterator.m} to use weighted residuals and Jacobian $\mat{J}^\top\mat{W}\mat{J}$.
+
+\subsection{2.3 NLOS Range Bias Correction\dif{\easy}}
+
+Physical bias correction applied per anchor before the solver:
+\[
+d_\text{corrected} = d_\text{measured} - k_\text{NLOS} \cdot \max(0,\; \Delta P_\text{NLOS} - 3\;\text{dB})
+\]
+Tunable slider \texttt{K\_NLOS} (0--0.06\,m/dB) in the tuning panel. Removes systematic positive through-wall ranging bias (typically 20--50\,cm per obstructed wall).
+
+\textbf{Requires:} Phase 2.1 for the per-packet NLOS score.
+
+\subsection{2.4 Per-Anchor Diagnostics Panel\dif{\easy}}
+
+Second axes in \texttt{LivePlotter} showing per-anchor range residual (bar chart) and NLOS score (colour-coded: green/yellow/red) updated every sweep. Provides immediate visual feedback on which anchor is causing problems.
+
+\subsection{\texorpdfstring{2.5 GPS-Style $\delta$-Solve (4+ Anchors)\dif{\medium}}{2.5 GPS-Style delta-Solve (4+ Anchors)}}
+
+Augment the multilateration state to $[\vect{x}^\top, \delta]^\top$ where $\delta$ is a common range bias:
+\[
+\hat{d}_i = \|\vect{x} - \vect{a}_i\| + \delta + e_i
+\]
+Jacobian row $i$: $[\text{unit\_vec}_i,\; 1]$. Solved $\delta$ is a real-time calibration health metric.
+
+\begin{warnbox}
+\textbf{Warning:} With $N = d+1$ anchors (3 in 2D) this reduces to TDOA geometry --- ill-conditioned near the anchor centroid. Only enable with $N \geq d+2$ anchors.
+\end{warnbox}
+
+\textbf{Requires:} Phase 4.1 (4th anchor).
+
+%% =============================================================================
+\section{Phase 3 --- State Estimation}
+%% =============================================================================
+
+\begin{phasebox}[Phase 3 --- State Estimation | Better filter models. MATLAB only.]
+Expected improvement: 1--4\,cm $\to$ 1--3\,cm XY.
+\end{phasebox}
+
+\subsection{\texorpdfstring{3.1 Constant-Acceleration EKF (CV $\to$ CA Model)\dif{\medium}}{3.1 Constant-Acceleration EKF (CV to CA Model)}}
+
+Upgrade from 4-state $[\vect{p}, \vect{v}]$ to 6-state $[\vect{p}, \vect{v}, \vect{a}]$. Dynamics: position $\leftarrow$ position $+$ velocity $\cdot\Delta t + \tfrac{1}{2}$ acceleration $\cdot\Delta t^2$; acceleration $\leftarrow$ acceleration $+$ random jerk (Singer model). Better tracks direction changes and acceleration phases; reduces lag on turns.
+
+\subsection{\texorpdfstring{3.2 $\delta$ as EKF State (Works with 3 Anchors)\dif{\medhard}}{3.2 delta as EKF State (Works with 3 Anchors)}}
+
+Add $\delta$ to EKF state: $[\vect{p}, \vect{v}, \delta]$ or $[\vect{p}, \vect{v}, \vect{a}, \delta]$. $\delta$ evolves as a random walk. Tight coupling: raw ranges feed directly into EKF measurement update. Measurement: $h_i(\vect{x}) = \|\vect{p}-\vect{a}_i\| + \delta$. Jacobian row $i$: $[\hat{u}_i,\; \mathbf{0},\; 1]$ (unit vector + zeros for velocity/accel + 1 for bias).
+
+\textbf{Advantage over multilaterator $\delta$-solve:} Works with 3 anchors; temporally smoothed; avoids ill-conditioning near centroid.
+
+\subsection{3.3 Moving Horizon Estimator (MHE)\dif{\hard}}
+
+Constrained optimisation over a sliding window of $N$ past sweeps. At time $k$, minimise:
+\[
+\min_{\{\vect{x}_t\}}\; \underbrace{\|\vect{x}_{k-N+1} - \bar{\vect{x}}_{k-N+1}\|^2_{\mat{P}_\text{arr}^{-1}}}_{\text{arrival cost}}
++ \underbrace{\sum_t \|\vect{x}_t - \mat{F}\vect{x}_{t-1}\|^2_{\mat{Q}^{-1}}}_{\text{dynamics}}
++ \underbrace{\sum_t\sum_i \rho_\delta\!\left(\|\vect{p}_t-\vect{a}_i\| - \hat{d}_{t,i}\right)}_{\text{range residuals (Huber)}}
+\]
+subject to $\vect{p}_\text{min} \leq \vect{p}_t \leq \vect{p}_\text{max}$ (room boundary) and $\|\vect{v}_t\| \leq v_\text{max}$ (speed limit).
+
+Huber loss threshold $\delta = 0.15$\,m. Computation: \texttt{fmincon} with $N=6$, $d=4$ states $\Rightarrow$ 2--5\,ms per solve.
+
+\textbf{Advantages over EKF:} NLOS absorbed by Huber loss; room boundary prevents wild jumps; physically impossible positions excluded.
+
+\subsection{3.4 Hybrid EKF + MHE\dif{\medium}}
+
+EKF every sweep (real-time, zero lag). MHE every $K=5$ sweeps (accuracy pass). If outputs diverge beyond threshold, flag increased uncertainty. Requires Phase 3.3 complete.
+
+%% =============================================================================
+\section{Phase 4 --- 3D + Orientation (XYZ + RPY)}
+%% =============================================================================
+
+\begin{phasebox}[Phase 4 --- 3D + RPY | Firmware + MATLAB. Adds the 3rd dimension and full orientation.]
+Expected outcome: XY 1--3\,cm, Z 2--5\,cm, RPY 3--5$^\circ$ at 100\,Hz.
+\end{phasebox}
+
+\subsection{4.1 4th Anchor + 3D Configuration\dif{\easy}}
+
+Flash board 4 as \texttt{ANCHOR\_ID = 0x04}. Mount at a different height from the others. Update \texttt{anchors.json}: add entry with non-zero $z$, set \texttt{"dim": 3}. Add \texttt{0x04} to \texttt{ANCHORS[]} in \texttt{Tag.ino}. This also enables the $\delta$-solve (Phase 2.5) since we now have $d+2 = 5$ constraints.
+
+\subsection{4.2 BNO085 IMU --- Firmware Implementation\dif{\medium}}
+
+Implement \texttt{SensorImu::begin()} and \texttt{SensorImu::read()} using the Adafruit BNO08x SPI library.
+
+\textbf{Why SPI:} The I2C bus (pins 4/5) is occupied by the SSD1306 OLED. The BNO085 also has known clock-stretching issues on ESP32 I2C.
+
+\textbf{Reports:} ARVR Stabilised Rotation Vector at 10\,ms intervals (quaternion, 100\,Hz) + Linear Acceleration at 10\,ms (gravity removed, 100\,Hz). The IMU tail in HostLink and the parser in \texttt{FrameParser.m} are already wired for this data.
+
+\subsection{4.3 RPY Output from Quaternion\dif{\easy}}
+
+Extract Euler angles from the BNO085 quaternion $[q_w, q_x, q_y, q_z]$ using the ZYX convention:
+\begin{align*}
+\phi   &= \text{atan2}\!\left(2(q_wq_x + q_yq_z),\; 1-2(q_x^2+q_y^2)\right) && \text{(roll)} \\
+\theta &= \arcsin\!\left(2(q_wq_y - q_zq_x)\right) && \text{(pitch)} \\
+\psi   &= \text{atan2}\!\left(2(q_wq_z + q_xq_y),\; 1-2(q_y^2+q_z^2)\right) && \text{(yaw)}
+\end{align*}
+Log RPY alongside XYZ. Add RPY readout to HUD. The magnetometer in the BNO085 provides an absolute yaw reference, preventing unbounded yaw drift.
+
+\textbf{Requires:} Phase 4.2.
+
+\subsection{4.4 Loose Coupling --- IMU-Aided EKF\dif{\hard}}
+
+IMU predict step at 100\,Hz (fills the 333\,ms gaps between UWB sweeps). UWB measurement update at 3\,Hz corrects accumulated drift.
+
+\textbf{State:} $[\vect{p}, \vect{v}, q_w, q_x, q_y, q_z, \delta]$ (11-state, 3D). IMU prediction:
+\begin{align*}
+\vect{a}^w &= \mat{R}(\vect{q})\,\vect{a}^b \quad\text{(rotate to world frame)} \\
+\vect{p}_{k+1} &= \vect{p}_k + \vect{v}_k\Delta t + \tfrac{1}{2}\vect{a}^w_k\Delta t^2 \\
+\vect{q}_{k+1} &= \vect{q}_k \otimes \exp\!\left(\tfrac{\Delta t}{2}\vect{\omega}^b_k\right)
+\end{align*}
+
+Effectively decouples position accuracy (UWB) from position smoothness (IMU).
+
+\subsection{4.5 Tight Coupling --- Raw Ranges + IMU in One Filter\dif{\vhard}}
+
+\textbf{State:} $[\vect{p}, \vect{v}, \vect{q}, \delta]$ (11-state). IMU drives prediction at 100\,Hz. Raw UWB ranges (not multilaterated position) are the measurement at 3\,Hz. Solver: MHE with Huber loss, room bounds, speed limit, and quaternion unit-norm constraint $\|\vect{q}\| = 1$.
+
+This is the architecture commercial UWB positioning systems use on dedicated hardware. Full 6-DOF output: XYZ + RPY + velocity + bias estimate.
+
+%% =============================================================================
+\section{Phase 5 --- System Hardening}
+%% =============================================================================
+
+\subsection{5.1 Deep Sleep on Anchors (from dw1000-ng)\dif{\medium}}
+Put DW1000 into deep sleep for $\sim$80\% of the sweep period between ranging cycles. Reduces anchor current from $\sim$100\,mA continuous to $\sim$20\,mA average --- significant for battery-powered deployment.
+
+\subsection{5.2 DW1000 Driver Error Handling\dif{\medium}}
+The vendored driver contains 40+ \texttt{// TODO proper error/warning handling} comments. Add recovery for SPI lockup, PLL failure, and LDE timeout. Auto-reset radio if it goes silent for $>$500\,ms.
+
+\subsection{5.3 Temperature Compensation\dif{\medium}}
+The DW1000 on-chip temperature sensor is OTP-calibrated and already read by the driver but never applied. Clock drift is approximately 0.1 ticks/$^\circ$C $\approx$ 0.5\,mm/$^\circ$C per board. Apply a linear correction relative to the calibration temperature.
+
+\subsection{5.4 Online Self-Calibration\dif{\hard}}
+Batch optimisation jointly solving for anchor positions and per-board delays using accumulated tag trajectory + range data. Requires spatial diversity (tag must visit different areas of the room). Replaces the manual calibration procedure entirely.
+
+%% =============================================================================
+\section{Phase 6 --- Scale and Future}
+%% =============================================================================
+
+\subsection{6.1 Multi-Tag TDMA Superframe\dif{\hard}}
+Time-slotted TDMA. Master anchor broadcasts slot assignments via ANNOUNCE frames (type byte already defined in \texttt{UwbFrame.h}). MATLAB maintains a separate EKF/MHE per \texttt{tagId}. Requires careful timing budget: $N_\text{anchors} \times N_\text{tags}$ TWR exchanges per superframe.
+
+\subsection{6.2 Differential Timestamp Encoding (pizzo00 technique)\dif{\hard}}
+If a broadcast POLL mode is ever needed (e.g.\ for firmware-side solving), adopt the pizzo00 12-byte/device encoding (two differential timestamps instead of three absolute) to reach 6 anchors per RANGE frame.
+
+\subsection{6.3 On-Device 2D Solve (jremington technique)\dif{\medium}}
+Precompute $(A^\top A)^{-1}$ once at startup (anchors are fixed). Position update becomes a matrix-vector multiply. Display $(x, y)$ on the OLED without a host PC. Useful for standalone deployment.
+
+%% =============================================================================
+\section{Full Item Index}
+%% =============================================================================
+
+\begin{longtable}{llll}
+\toprule
+\textbf{Item} & \textbf{Description} & \textbf{Difficulty} & \textbf{Status} \\
+\midrule
+\endhead
+\multicolumn{4}{l}{\textit{Phase 0 --- Already Done}} \\
+\midrule
+0.1 & MATLAB watchdog + UDP auto-reconnect & --- & \done \\
+0.2 & EKF divergence guard + auto-reset & --- & \done \\
+0.3 & Age-gated anchor eviction (MATLAB) & --- & \done \\
+0.4 & \texttt{RANGE\_BIAS\_M} tuning slider & --- & \done \\
+0.5 & Inner try-catch (bad sweeps skip, session survives) & --- & \done \\
+0.6 & Status label in tuning panel & --- & \done \\
+\midrule
+\multicolumn{4}{l}{\textit{Phase 1 --- Foundation}} \\
+\midrule
+1.0 & Switch to 64\,MHz PRF (\texttt{MODE\_LONGDATA\_RANGE\_ACCURACY}) & \easy & Pending \\
+1.1 & Better calibration (200 samples, multi-distance) & \easy & Pending \\
+1.2 & Adaptive polling --- skip dead anchors (firmware) & \easy & Partial \\
+1.3 & Faster sweep rate (reduce reply delay / mode change) & \medium & Pending \\
+1.5 & Anchor self-survey + auto \texttt{anchors.json} & \medium & Pending \\
+\midrule
+\multicolumn{4}{l}{\textit{Phase 2 --- Ranging Quality}} \\
+\midrule
+2.1 & FP\_POWER NLOS detection (firmware + wire format) & \medium & Pending \\
+2.2 & Weighted multilateration (NLOS score $\to$ weights) & \medium & Pending \\
+2.3 & NLOS range bias correction slider & \easy & Pending \\
+2.4 & Per-anchor diagnostics panel in LivePlotter & \easy & Pending \\
+2.5 & GPS-style $\delta$-solve in Multilaterator (4+ anchors) & \medium & Pending \\
+\midrule
+\multicolumn{4}{l}{\textit{Phase 3 --- State Estimation}} \\
+\midrule
+3.1 & Constant-acceleration EKF (CV $\to$ CA model) & \medium & Pending \\
+3.2 & $\delta$ as EKF state (bias estimation, 3 anchors OK) & \medhard & Pending \\
+3.3 & MHE (sliding window, Huber loss, room constraints) & \hard & Pending \\
+3.4 & Hybrid EKF + MHE & \medium & Pending \\
+\midrule
+\multicolumn{4}{l}{\textit{Phase 4 --- 3D + RPY}} \\
+\midrule
+4.1 & 4th anchor + 3D \texttt{anchors.json} & \easy & Pending \\
+4.2 & BNO085 \texttt{SensorImu} implementation (SPI) & \medium & Pending \\
+4.3 & RPY output from quaternion & \easy & Pending \\
+4.4 & Loose coupling --- IMU-aided EKF (100\,Hz predict) & \hard & Pending \\
+4.5 & Tight coupling --- raw ranges + IMU in MHE & \vhard & Pending \\
+\midrule
+\multicolumn{4}{l}{\textit{Phase 5 --- System Hardening}} \\
+\midrule
+5.1 & Deep sleep on anchors & \medium & Pending \\
+5.2 & DW1000 driver error handling & \medium & Pending \\
+5.3 & Temperature compensation & \medium & Pending \\
+5.4 & Online self-calibration & \hard & Pending \\
+\midrule
+\multicolumn{4}{l}{\textit{Phase 6 --- Scale}} \\
+\midrule
+6.1 & Multi-tag TDMA superframe & \hard & Pending \\
+6.2 & Differential timestamp encoding & \hard & Pending \\
+6.3 & On-device 2D solve (OLED display) & \medium & Pending \\
+\bottomrule
+\end{longtable}
+
+%% =============================================================================
+\section{Expected Accuracy at Each Phase}
+%% =============================================================================
+
+\begin{table}[ht]
+\centering
+\caption{Expected accuracy progression through implementation phases}
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{cllllp{5cm}}
+\toprule
+\textbf{After} & \textbf{XY} & \textbf{Z} & \textbf{RPY} & \textbf{Rate} & \textbf{Key enabler} \\
+\midrule
+Current  & 3--10\,cm & ---      & ---         & 3\,Hz       & Calibration noise + NLOS + CV EKF \\
+Phase 1  & 2--6\,cm  & ---      & ---         & 4--8\,Hz    & Calibration bias removed, PRF improved \\
+Phase 2  & 1--4\,cm  & ---      & ---         & 4--8\,Hz    & NLOS weighted/rejected before solver \\
+Phase 3  & 1--3\,cm  & ---      & ---         & 4--8\,Hz    & Better filter model, MHE room constraints \\
+Phase 4  & 1--3\,cm  & 2--5\,cm & 3--5$^\circ$ & 100\,Hz RPY & IMU fills gaps, 3D anchor geometry \\
+Phase 5+ & 1--3\,cm  & 2--5\,cm & 3--5$^\circ$ & 100\,Hz RPY & Reliability, power, robustness \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%% =============================================================================
+\section{Recommended Implementation Sequence}
+%% =============================================================================
+
+\begin{center}
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{ccccccccccccc}
+1.0 & $\to$ & 1.1 & $\to$ & 1.2 & $\to$ & 1.5 & $\to$ & 1.3 & $\to$ & 2.1 & $\to$ & 2.2 \\
+PRF && Cal && Poll && Survey && Rate && NLOS && Wgt \\[4pt]
+$\to$ & 2.4 & $\to$ & 3.1 & $\to$ & 4.1 & $\to$ & 4.2 & $\to$ & 4.3 & $\to$ & 4.4 & \\
+& Plot && CA-EKF && 4th Anchor && IMU && RPY && Fusion &
+\end{tabular}
+\end{center}
+
+\bigskip
+Phases 2.5, 3.2, 3.3, 3.4, 4.5, and all of Phases 5--6 can be added in any order after 4.4 is stable.
+
+\end{document}

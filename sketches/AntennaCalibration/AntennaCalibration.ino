@@ -39,6 +39,7 @@ static const uint8_t  SEARCH_ITERS     = 14;    // Phase 1.1: 12->14 narrows the
 
 TwrEngine  engine;
 OledStatus oled;
+static uint16_t g_calibratedDelay = 0;  // set by setup(), read by loop()
 
 static float measureMean(uint16_t samples) {
   float sum = 0.0f; uint16_t ok = 0;
@@ -91,6 +92,8 @@ void setup() {
     if (mean > TRUE_DISTANCE_M) low = mid; else high = mid;
   }
 
+  g_calibratedDelay = mid;
+
   Serial.println();
   Serial.printf("==> Calibrated ANTENNA_DELAY = %u\n", mid);
   Serial.println(F("Paste this into this board's Anchor.ino / Tag.ino."));
@@ -101,11 +104,12 @@ void setup() {
 }
 
 void loop() {
-  // Continuous readout at the converged delay for a final sanity check.
+  // Continuous readout at the converged delay — one line per second.
+  static uint32_t lastPrint = 0;
   float d, q;
-  if (engine.rangeTo(REF_ANCHOR_ID, d, q)) {
-    Serial.printf("d=%.3f m  (true %.3f)  rxPower=%.1f dBm\n",
-                  d, TRUE_DISTANCE_M, q);
+  if (engine.rangeTo(REF_ANCHOR_ID, d, q) && millis() - lastPrint >= 1000) {
+    lastPrint = millis();
+    Serial.printf("DELAY=%u  d=%.3f m  (true %.3f)  err=%+.3f m\n",
+                  g_calibratedDelay, d, TRUE_DISTANCE_M, d - TRUE_DISTANCE_M);
   }
-  delay(100);
 }

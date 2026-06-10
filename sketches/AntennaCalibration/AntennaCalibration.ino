@@ -28,16 +28,21 @@ static const uint8_t  REF_ANCHOR_ID    = 0x02;           // the reference board'
 static const uint8_t  THIS_ID          = UWB_ADDR_TAG_BASE;
 static const uint16_t DELAY_LOW        = 15800;
 static const uint16_t DELAY_HIGH       = 16900;
-static const uint8_t  SAMPLES_PER_STEP = 40;
-static const uint8_t  SEARCH_ITERS     = 12;
+static const uint16_t SAMPLES_PER_STEP = 200;  // Phase 1.1: 40->200 shrinks the
+                                                // mean's statistical uncertainty
+                                                // from ~+-1 cm (~3 delay units) to
+                                                // ~+-0.3 cm. Note: uint16_t now, so
+                                                // 256+ samples won't silently wrap.
+static const uint8_t  SEARCH_ITERS     = 14;    // Phase 1.1: 12->14 narrows the
+                                                // binary search to ~0.07 delay units.
 // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 TwrEngine  engine;
 OledStatus oled;
 
-static float measureMean(uint8_t samples) {
+static float measureMean(uint16_t samples) {
   float sum = 0.0f; uint16_t ok = 0;
-  for (uint8_t i = 0; i < samples; i++) {
+  for (uint16_t i = 0; i < samples; i++) {
     float d, q;
     if (engine.rangeTo(REF_ANCHOR_ID, d, q)) { sum += d; ok++; }
     delay(5);

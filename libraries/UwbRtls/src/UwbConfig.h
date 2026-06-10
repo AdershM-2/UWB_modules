@@ -27,17 +27,22 @@
 #define OLED_PIN_SCL   5
 
 // ---------------------------------------------------------------------------
-// Radio profile - long range / robust. Same on every board.
-//   MODE_LONGDATA_RANGE_LOWPOWER = 110 kb/s, 16 MHz PRF, 2048 preamble.
-//   This is the most range- and noise-tolerant mode, ideal for the Pro's PA.
+// Radio profile - accuracy mode. Same on every board. (Phase 1.0)
+//   MODE_LONGDATA_RANGE_ACCURACY = 110 kb/s, 64 MHz PRF, 2048 preamble.
+//   64 MHz PRF sharpens the channel-impulse-response autocorrelation peak, so
+//   the receiver locks the first-path arrival more reliably and rejects later
+//   multipath peaks. This improves ranging ACCURACY, not range - the Pro board's
+//   PA/LNA already covers range. The 16 MHz LOWPOWER variant is the more
+//   noise-tolerant alternative if range ever becomes the limiting factor.
 // ---------------------------------------------------------------------------
-#define UWB_RADIO_MODE   DW1000.MODE_LONGDATA_RANGE_LOWPOWER
+#define UWB_RADIO_MODE   DW1000.MODE_LONGDATA_RANGE_ACCURACY
 #define UWB_CHANNEL      DW1000.CHANNEL_5
 
 // Reply delay used for the delayed transmits in two-way ranging (microseconds).
-// 7000 us is the proven value for the 110 kb/s / long-preamble profile above.
-// If you switch to a faster mode you can reduce this (e.g. 3000 us at 6.8 Mb/s).
-#define UWB_REPLY_DELAY_US   7000
+// 6000 us pairs with the 64 MHz accuracy profile above (Phase 1.0); the previous
+// 16 MHz LOWPOWER profile used 7000 us. If you switch to a faster data-rate mode
+// you can reduce this further (e.g. 3000 us at 6.8 Mb/s).
+#define UWB_REPLY_DELAY_US   6000
 
 // Default antenna delay (DW1000 ticks). Each board overrides this with its own
 // CALIBRATED value (see examples/AntennaCalibration). 16384 is the chip reset

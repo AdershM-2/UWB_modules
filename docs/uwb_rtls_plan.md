@@ -1,5 +1,10 @@
 # UWB RTLS — Full Improvement Plan (Rev 2)
-*Last updated: 2026-06-08*
+*Last updated: 2026-06-10*
+
+> **This file is the live, portable progress tracker** (committed to git, so it is
+> readable from any clone on any PC). Per-item status markers below are the source
+> of truth. The `.tex`/`.pdf` siblings are formal snapshots — regenerate them from
+> this when convenient. See the root `CLAUDE.md` for repo orientation + gotchas.
 
 ---
 
@@ -73,14 +78,18 @@
 
 *No algorithm changes. Highest ROI for effort.*
 
-### 1.0 Switch to 64 MHz PRF accuracy mode
+### 1.0 Switch to 64 MHz PRF accuracy mode  — ✓ CODE DONE (2026-06-10)
+> **Status:** Code complete in `libraries/UwbRtls/src/UwbConfig.h` — `UWB_RADIO_MODE` → `MODE_LONGDATA_RANGE_ACCURACY`, `UWB_REPLY_DELAY_US` 7000 → 6000 µs (shared header, applies to all boards). **Pending on hardware:** reflash all 4 boards, then re-run calibration — antenna-delay values differ between PRF modes, so existing delays are now stale.
+
 **What:** Change `DW1000.enableMode(MODE_LONGDATA_RANGE_LOWPOWER)` → `MODE_LONGDATA_RANGE_ACCURACY` in `UwbConfig.h`.  
 **Why:** 64 MHz PRF produces a sharper correlation peak in the channel impulse response → better first-path detection → less multipath ambiguity. The Pro boards already have a PA/LNA for range; this improves accuracy not range.  
 **Note:** Must reflash all 4 boards. Re-calibrate after (step 1.1) — delay values will differ. Reduce reply delay from 7000 → 6000 µs.  
 **Removes:** ~1–3 cm systematic ranging error from multipath peak ambiguity.  
 **Complexity:** Easy
 
-### 1.1 Better calibration
+### 1.1 Better calibration  — ✓ CODE DONE (2026-06-10)
+> **Status:** Code complete — `SAMPLES_PER_STEP` 40 → 200, `SEARCH_ITERS` 12 → 14 in **both** `AntennaCalibration.ino` copies (`sketches/` active + `libraries/UwbRtls/examples/` reference); also widened the sample count + loop counter to `uint16_t` so higher counts can't wrap. **Pending on hardware:** run the calibration, validate at two distances (≈1.5 m and ≈5 m, agree within ±2 cm).
+
 **What:** Change `SAMPLES_PER_STEP` 40 → 200, `SEARCH_ITERS` 12 → 14 in `AntennaCalibration.ino`.  
 **Why:** 40 samples gives ±1 cm statistical uncertainty on the mean → ±3 delay units systematic error. 200 samples reduces to ±0.3 cm.  
 **Validation:** After convergence, run loop() for 60 s and record mean ± std. Validate at two distances (e.g. 1.5 m and 5 m); both should agree within ±2 cm.  
@@ -280,8 +289,8 @@ Phase 0 — Already Done
   ✓  Status label in tuning panel
 
 Phase 1 — Foundation
-  1.0  Switch to 64 MHz PRF (MODE_LONGDATA_RANGE_ACCURACY)    Easy
-  1.1  Better calibration (200 samples, multi-distance)        Easy
+  1.0  Switch to 64 MHz PRF (MODE_LONGDATA_RANGE_ACCURACY)    Easy   ✓ code done (HW: reflash+recal)
+  1.1  Better calibration (200 samples, multi-distance)        Easy   ✓ code done (HW: run+validate)
   1.2  Adaptive polling — skip dead anchors (firmware)         Easy
   1.3  Faster sweep rate (reduce reply delay / mode change)    Medium
   1.5  Anchor self-survey + auto anchors.json                  Medium

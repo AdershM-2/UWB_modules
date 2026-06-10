@@ -27,18 +27,20 @@ static const uint8_t  REF_ANCHOR_ID   = 0x01;    // the reference board's ID
 static const uint8_t  THIS_ID         = UWB_ADDR_TAG_BASE;  // this board's addr
 static const uint16_t DELAY_LOW       = 15800;   // search bounds (ticks)
 static const uint16_t DELAY_HIGH      = 16900;
-static const uint8_t  SAMPLES_PER_STEP = 40;     // averaged measurements/step
-static const uint8_t  SEARCH_ITERS     = 12;     // ~ resolves to <1 tick
+static const uint16_t SAMPLES_PER_STEP = 200;    // Phase 1.1: 40->200 cuts the
+                                                 // mean's uncertainty from ~+-1 cm
+                                                 // (~3 delay units) to ~+-0.3 cm.
+static const uint8_t  SEARCH_ITERS     = 14;     // Phase 1.1: 12->14, <0.1 tick
 // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 TwrEngine engine;
 
 // Average measured distance to the reference, at the current antenna delay.
 // Returns NAN if too few exchanges succeeded.
-static float measureMean(uint8_t samples) {
+static float measureMean(uint16_t samples) {
   float sum = 0.0f;
   uint16_t ok = 0;
-  for (uint8_t i = 0; i < samples; i++) {
+  for (uint16_t i = 0; i < samples; i++) {
     float d, q;
     if (engine.rangeTo(REF_ANCHOR_ID, d, q)) {
       sum += d;

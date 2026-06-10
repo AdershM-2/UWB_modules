@@ -45,6 +45,8 @@ static float measureMean(uint16_t samples) {
   for (uint16_t i = 0; i < samples; i++) {
     float d, q;
     if (engine.rangeTo(REF_ANCHOR_ID, d, q)) { sum += d; ok++; }
+    if ((i & 0x1F) == 0x1F)   // print progress every 32 samples
+      Serial.printf("  [%u/%u ok=%u]\n", i+1, samples, ok);
     delay(5);
   }
   return (ok < samples / 4) ? NAN : sum / ok;

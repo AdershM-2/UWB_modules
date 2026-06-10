@@ -95,7 +95,7 @@ bool TwrEngine::rangeTo(uint8_t anchorAddr, float& distanceMeters, float& rxPowe
 
   // Listen for POLL_ACK.
   startRx();
-  if (!waitReceived(30)) return false;
+  if (!waitReceived(30)) { startRx(); return false; }
   readFrame();
   if (frameType(_rx) != MSG_POLL_ACK || frameSrc(_rx) != anchorAddr ||
       !frameIsForUs(_rx, _myAddr)) {
@@ -117,7 +117,7 @@ bool TwrEngine::rangeTo(uint8_t anchorAddr, float& distanceMeters, float& rxPowe
 
   // Listen for RANGE_REPORT (anchor computed the distance).
   startRx();
-  if (!waitReceived(40)) return false;
+  if (!waitReceived(40)) { startRx(); return false; }
   readFrame();
   if (frameType(_rx) != MSG_RANGE_REPORT || frameSrc(_rx) != anchorAddr) {
     startRx();

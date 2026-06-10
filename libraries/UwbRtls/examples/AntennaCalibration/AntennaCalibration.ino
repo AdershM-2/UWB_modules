@@ -46,6 +46,8 @@ static float measureMean(uint16_t samples) {
       sum += d;
       ok++;
     }
+    if ((i & 0x1F) == 0x1F)   // print progress every 32 samples
+      Serial.printf("  [%u/%u ok=%u]\n", i+1, samples, ok);
     delay(5);
   }
   if (ok < samples / 4) return NAN;

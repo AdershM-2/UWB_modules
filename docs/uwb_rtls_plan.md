@@ -97,6 +97,9 @@
 **Complexity:** Easy
 
 ### 1.2 Adaptive polling + age-gated anchor eviction
+
+> **Status:** ✓ CODE DONE (2026-06-11) — `UwbScheduler` now tracks per-anchor `_failStreak`/`_skipSweeps`/`_backoffMult`; 3 consecutive fails → skip 5 sweeps, doubling each subsequent backoff (5→10→20→40, capped). Serial prints `[SCHED]` on skip and on recovery. MATLAB side was already done. No hardware reflash required (library change).
+
 **Firmware (remaining):** Add `failCount[N]` per anchor in `UwbScheduler`; after 3 consecutive fails, skip for 5 sweeps then retry with exponential backoff.  
 **MATLAB:** ✓ Done — `anchorLastSeen` + `AGE_GATE_SEC = 3.0` clears stale range history automatically.  
 **Removes:** 100 ms wasted per dead anchor per sweep; prevents stale ranges poisoning the solver.  
@@ -291,7 +294,7 @@ Phase 0 — Already Done
 Phase 1 — Foundation
   1.0  Switch to 64 MHz PRF (MODE_LONGDATA_RANGE_ACCURACY)    Easy   ✓ code done (HW: reflash+recal)
   1.1  Better calibration (200 samples, multi-distance)        Easy   ✓ code done (HW: run+validate)
-  1.2  Adaptive polling — skip dead anchors (firmware)         Easy
+  1.2  Adaptive polling — skip dead anchors (firmware)         Easy   ✓ code done
   1.3  Faster sweep rate (reduce reply delay / mode change)    Medium
   1.5  Anchor self-survey + auto anchors.json                  Medium
 

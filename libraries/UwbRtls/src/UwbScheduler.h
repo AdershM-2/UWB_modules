@@ -44,6 +44,18 @@ private:
   RangeResult _results[UWB_MAX_ANCHORS];
   uint8_t     _n = 0;
   uint32_t    _sweepSeq = 0;
+
+  // Dead-anchor skip / exponential backoff.
+  // After SKIP_AFTER_FAILS consecutive failures the anchor is skipped for
+  // SKIP_BASE_SWEEPS sweeps (doubling each time, capped at SKIP_MAX_SWEEPS).
+  // The slot is retried after the skip window; backoff resets on any success.
+  static constexpr uint8_t SKIP_AFTER_FAILS = 3;
+  static constexpr uint8_t SKIP_BASE_SWEEPS = 5;
+  static constexpr uint8_t SKIP_MAX_SWEEPS  = 40;
+
+  uint8_t _failStreak[UWB_MAX_ANCHORS];   // consecutive rangeTo() failures
+  uint8_t _skipSweeps[UWB_MAX_ANCHORS];   // sweeps still to skip
+  uint8_t _backoffMult[UWB_MAX_ANCHORS];  // backoff multiplier: 1→2→4→8 (capped)
 };
 
 #endif // UWBRTLS_UWBSCHEDULER_H

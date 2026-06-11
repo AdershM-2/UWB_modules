@@ -59,5 +59,6 @@ Done so far (code in working tree):
   *Hardware follow-up pending: reflash all 4 boards + recalibrate.*
 - **Phase 1.1** — both `AntennaCalibration.ino` copies: 200 samples / 14 iters, uint16_t-safe.
   *Hardware follow-up pending: run calibration + validate at two distances.*
+- **Phase 1.2** — `UwbScheduler`: per-anchor `_failStreak`/`_skipSweeps`/`_backoffMult`; 3 fails → skip 5 sweeps, doubling each time (5→10→20→40). Serial `[SCHED]` prints on skip/recovery. Library change only — no reflash needed.
 
-Recommended next sequence: **1.2 → 1.5 → 1.3 → 2.1 → 2.2 → 2.4 → 3.1 → 4.1 → 4.2 → 4.3 → 4.4.**
+Recommended next sequence: **1.5 → 1.3 → 2.1 → 2.2 → 2.4 → 3.1 → 4.1 → 4.2 → 4.3 → 4.4.**

@@ -39,10 +39,11 @@
 #define UWB_CHANNEL      DW1000.CHANNEL_5
 
 // Reply delay used for the delayed transmits in two-way ranging (microseconds).
-// 6000 us pairs with the 64 MHz accuracy profile above (Phase 1.0); the previous
-// 16 MHz LOWPOWER profile used 7000 us. If you switch to a faster data-rate mode
-// you can reduce this further (e.g. 3000 us at 6.8 Mb/s).
-#define UWB_REPLY_DELAY_US   6000
+// History: 7000 us (16 MHz LOWPOWER) → 6000 us (Phase 1.0, 64 MHz ACCURACY) →
+//          5000 us (Phase 1.3, same mode, tighter margin but well-validated).
+// Minimum safe value for this mode is ~3500 us (ESP32 SPI + DW1000 processing).
+// If you switch to 6.8 Mb/s fast mode, this can drop to ~1500 us.
+#define UWB_REPLY_DELAY_US   5000
 
 // Default antenna delay (DW1000 ticks). Each board overrides this with its own
 // CALIBRATED value (see examples/AntennaCalibration). 16384 is the chip reset

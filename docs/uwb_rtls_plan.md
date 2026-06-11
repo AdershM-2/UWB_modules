@@ -106,10 +106,15 @@
 **Complexity:** Easy
 
 ### 1.3 Faster sweep rate
-**Option A:** Reduce `UWB_REPLY_DELAY_US` 7000 → 5500 µs; verify exchanges still succeed.  
-**Option B (bigger):** Switch to `MODE_SHORTDATA_FAST_LOWPOWER` (6.8 Mbps, 64-symbol preamble) → reply delay drops to ~1500 µs → 8–10 Hz for 3 anchors. Cost: ~2 m range reduction (fine for ≤15 m indoor use).  
+
+> **Status (Option A):** ✓ CODE DONE (2026-06-11) — `UWB_REPLY_DELAY_US` 6000 → 5000 µs in `UwbConfig.h`. Saves 2 ms per exchange / 8 ms per sweep (4 anchors). Estimated sweep rate: 8 Hz → ~10 Hz. Requires reflash of all boards. Validate by checking Serial Monitor for exchange failures; if drops increase, revert to 6000 µs.
+
+**Option A:** ✓ Done — Reduced `UWB_REPLY_DELAY_US` 6000 → 5000 µs (was 7000 µs before Phase 1.0). Minimum safe value for 110 kbps / 64 MHz PRF mode is ~3500 µs; 5000 µs leaves ~1.5 ms margin above ESP32 SPI + DW1000 processing time.
+
+> 🔴 **Option B — PENDING:** Switch to `MODE_SHORTDATA_FAST_LOWPOWER` (6.8 Mbps, 64-symbol preamble, reply delay ~1500 µs). Estimated sweep rate: ~35–45 Hz for 4 anchors. Trades 64 MHz PRF accuracy for speed — increases multipath sensitivity in small rooms. Defer until Phase 2.1 NLOS detection is in place to compensate. Only needed if >15 Hz is required for the application.
+
 **Effect:** Higher sweep rate directly improves every filter layer downstream.  
-**Complexity:** Easy → Medium
+**Complexity:** Option A: Easy | Option B: Medium (needs mode switch + recalibration)
 
 ### 1.4 Multipath bias correction (MATLAB slider) ✓ Done
 Global `RANGE_BIAS_M` subtracted from all filtered ranges before multilaterator. Tunable 0–0.10 m via slider. Tune by placing tag at a known point and minimising `info.rms`.
@@ -295,7 +300,7 @@ Phase 1 — Foundation
   1.0  Switch to 64 MHz PRF (MODE_LONGDATA_RANGE_ACCURACY)    Easy   ✓ code done (HW: reflash+recal)
   1.1  Better calibration (200 samples, multi-distance)        Easy   ✓ code done (HW: run+validate)
   1.2  Adaptive polling — skip dead anchors (firmware)         Easy   ✓ code done
-  1.3  Faster sweep rate (reduce reply delay / mode change)    Medium
+  1.3  Faster sweep rate — Option A done (5000 µs); 🔴 Option B (6.8 Mbps) pending
   1.5  Anchor self-survey + auto anchors.json                  Medium
 
 Phase 2 — Ranging Quality

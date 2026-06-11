@@ -306,6 +306,10 @@ Global \texttt{RANGE\_BIAS\_M} subtracted from all filtered ranges before the mu
 
 \subsection{1.5 Anchor Self-Survey (Auto-Localization)\dif{\medium}}
 
+\begin{donebox}
+\textbf{Status (2026-06-11):} \done{} --- No extra sketch or reflash needed. Two new UWB message types (\texttt{MSG\_SURVEY\_REQ}/\texttt{MSG\_SURVEY\_RESP}) added to \texttt{UwbFrame} and \texttt{TwrEngine}. Tag accepts \texttt{SURVEY\textbackslash n} over Serial: loops over all anchor pairs, sends \texttt{MSG\_SURVEY\_REQ} to Anchor\,A (which calls \texttt{rangeTo(B)} and replies), averages 100 samples per pair ($\approx$4\,s/pair). \texttt{matlab/runSurvey.m} collects results, runs classical MDS, fixes the coordinate frame, and writes \texttt{config/anchors.json}. Run \texttt{run\_localization.m} immediately after --- no reflash required.
+\end{donebox}
+
 \textbf{What:} Anchors range to each other. MATLAB computes the anchor layout via Multidimensional Scaling (MDS) and writes \texttt{anchors.json} automatically. No tape measure required.
 
 \textbf{Firmware:} New sketch \texttt{examples/AnchorSurvey/AnchorSurvey.ino}. Each anchor temporarily takes the tag role and ranges to all other anchor addresses. Sends \texttt{SURVEY,v1,<src>,<dst>,<dist\_mm>,<quality>} over HostLink.
@@ -529,7 +533,7 @@ Precompute $(A^\top A)^{-1}$ once at startup (anchors are fixed). Position updat
 1.1 & Better calibration (200 samples, multi-distance) & \easy & \codehwdone \\
 1.2 & Adaptive polling --- skip dead anchors (firmware) & \easy & \done \\
 1.3 & Faster sweep rate --- Option A \codehwdone; Option B \pendingopt & \medium & Partial \\
-1.5 & Anchor self-survey + auto \texttt{anchors.json} & \medium & Pending \\
+1.5 & Anchor self-survey + auto \texttt{anchors.json} & \medium & \done \\
 \midrule
 \multicolumn{4}{l}{\textit{Phase 2 --- Ranging Quality}} \\
 \midrule

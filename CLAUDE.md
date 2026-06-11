@@ -62,5 +62,6 @@ Done so far (code in working tree):
 - **Phase 1.2** — `UwbScheduler`: per-anchor `_failStreak`/`_skipSweeps`/`_backoffMult`; 3 fails → skip 5 sweeps, doubling each time (5→10→20→40). Serial `[SCHED]` prints on skip/recovery. Library change only — no reflash needed.
 - **Phase 1.3 Option A** — `UwbConfig.h`: `UWB_REPLY_DELAY_US` 6000 → 5000 µs. ~8 Hz → ~10 Hz sweep rate. *Hardware follow-up: reflash all boards, confirm no increase in exchange failures.*
   *Option B (6.8 Mbps fast mode) — PENDING: deferred until Phase 2.1 NLOS detection is in place.*
+- **Phase 1.5** — Anchor self-survey: `MSG_SURVEY_REQ/RESP` in `UwbFrame`+`TwrEngine`; tag accepts `SURVEY\n` serial command; 100 samples/pair, averaged. `matlab/runSurvey.m` runs MDS and writes `anchors.json`. No reflash needed — trigger anytime, then run `run_localization.m`.
 
-Recommended next sequence: **1.5 → 2.1 → 2.2 → 2.4 → 3.1 → 4.1 → 4.2 → 4.3 → 4.4.**
+Recommended next sequence: **2.1 → 2.2 → 2.4 → 3.1 → 4.1 → 4.2 → 4.3 → 4.4.**

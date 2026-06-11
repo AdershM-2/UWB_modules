@@ -120,12 +120,15 @@
 Global `RANGE_BIAS_M` subtracted from all filtered ranges before multilaterator. Tunable 0–0.10 m via slider. Tune by placing tag at a known point and minimising `info.rms`.
 
 ### 1.5 Anchor self-survey (auto-localization)
+
+> **Status:** ✓ CODE DONE (2026-06-11) — No extra sketch or reflash needed. The tag firmware now accepts a `SURVEY\n` serial command; it loops over all anchor pairs and sends `MSG_SURVEY_REQ` to each anchor, which temporarily calls `rangeTo()` to the target anchor and replies with `MSG_SURVEY_RESP`. 100 samples averaged per pair. `matlab/runSurvey.m` collects results, runs classical MDS, fixes the coordinate frame, and writes `anchors.json` in the format expected by `AnchorConfig.fromJson()`. Run `run_localization.m` immediately after — no reflash of any board needed.
+
 **What:** Anchors range to each other; MATLAB computes their layout via MDS; `anchors.json` is written automatically. No tape measure required.  
-**Firmware:** New sketch `examples/AnchorSurvey/AnchorSurvey.ino`. Each anchor temporarily uses `TWR_TAG` role to range to all other anchor addresses. Sends results over HostLink: `SURVEY,v1,<src>,<dst>,<dist_mm>,<quality>`.  
-**MATLAB:** New script `matlab/runSurvey.m`. Collects N×(N-1)/2 pairwise distances (averaged over 100 sweeps per pair for ~1–2 cm accuracy). Runs classical MDS. Fixes coordinate frame (anchor 1 at origin, anchor 2 on +X axis, anchor 3 in +Y half-plane). Writes `anchors.json`.  
+**Protocol:** Tag sends `MSG_SURVEY_REQ(target=B)` to Anchor A → Anchor A calls `rangeTo(B)` → Anchor A sends `MSG_SURVEY_RESP(src=A, dst=B, dist, rxp)` → Tag outputs `SURVEY,v1,<src>,<dst>,<avg_dist_mm>,<ok>` line.  
+**MATLAB:** `matlab/runSurvey.m`. Collects N×(N-1)/2 pairs (100 samples each, ~4 s/pair). Classical MDS. Frame fixed (anchor 1 origin, anchor 2 on +X, anchor 3 in +Y half-plane). Writes `anchors.json`.  
 **Accuracy:** ~1–2 cm anchor position accuracy after 100-sample averaging.  
 **Limitation:** 3D self-survey requires meaningful height variation across anchors. All-same-height gives degenerate Z axis.  
-**Complexity:** Medium (new sketch + new MATLAB script)
+**Complexity:** Medium (firmware protocol + MATLAB MDS)
 
 ---
 
@@ -301,7 +304,7 @@ Phase 1 — Foundation
   1.1  Better calibration (200 samples, multi-distance)        Easy   ✓ code done (HW: run+validate)
   1.2  Adaptive polling — skip dead anchors (firmware)         Easy   ✓ code done
   1.3  Faster sweep rate — Option A done (5000 µs); 🔴 Option B (6.8 Mbps) pending
-  1.5  Anchor self-survey + auto anchors.json                  Medium
+  1.5  Anchor self-survey + auto anchors.json                  Medium ✓ code done
 
 Phase 2 — Ranging Quality
   2.1  FP_POWER NLOS detection (firmware + wire format)        Medium

@@ -68,6 +68,20 @@ public:
   }
 #endif
 
+  // Send a pre-formatted line as-is (survey control lines, diagnostics, etc.).
+  // Caller must include the trailing '\n'.
+  void sendRaw(const char* line) {
+    size_t len = strlen(line);
+#if defined(UWB_HOSTLINK_UDP)
+    if (WiFi.status() == WL_CONNECTED) {
+      _udp.beginPacket(_host, _port);
+      _udp.write(reinterpret_cast<const uint8_t*>(line), len);
+      _udp.endPacket();
+    }
+#endif
+    Serial.write(line, len);
+  }
+
   // Format and send one sweep. imu may be nullptr (or invalid) to omit IMU data.
   void sendSweep(uint32_t tMs, uint8_t tagId, const UwbScheduler& sched,
                  const ImuSample* imu = nullptr) {

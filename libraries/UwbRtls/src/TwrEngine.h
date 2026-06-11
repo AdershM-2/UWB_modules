@@ -39,6 +39,11 @@ public:
   // Returns true on success; outputs distance in metres and RX power in dBm.
   bool rangeTo(uint8_t anchorAddr, float& distanceMeters, float& rxPowerDbm);
 
+  // Ask anchorAddr to range to targetAddr and report back (Phase 1.5 survey).
+  // The anchor temporarily acts as initiator; targetAddr must be in responder mode.
+  bool surveyRequest(uint8_t anchorAddr, uint8_t targetAddr,
+                     float& distanceMeters, float& rxPowerDbm);
+
   // ---- ANCHOR role --------------------------------------------------------
   // Non-blocking: handle any pending POLL / RANGE and reply. Call from loop().
   void serviceResponder();

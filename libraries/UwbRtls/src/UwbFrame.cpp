@@ -39,3 +39,16 @@ void unpackReportPayload(const byte* f, float& distanceMeters, float& rxPowerDbm
   memcpy(&distanceMeters, f + UWB_HDR_LEN + 0, sizeof(float));
   memcpy(&rxPowerDbm,     f + UWB_HDR_LEN + 4, sizeof(float));
 }
+
+void packSurveyResp(byte* f, uint8_t target, float distMeters, float rxPowerDbm) {
+  f[UWB_HDR_LEN] = target;
+  memcpy(f + UWB_HDR_LEN + 1, &distMeters,   sizeof(float));
+  memcpy(f + UWB_HDR_LEN + 5, &rxPowerDbm,   sizeof(float));
+}
+
+void unpackSurveyResp(const byte* f, uint8_t& target,
+                      float& distMeters, float& rxPowerDbm) {
+  target = f[UWB_HDR_LEN];
+  memcpy(&distMeters,  f + UWB_HDR_LEN + 1, sizeof(float));
+  memcpy(&rxPowerDbm,  f + UWB_HDR_LEN + 5, sizeof(float));
+}

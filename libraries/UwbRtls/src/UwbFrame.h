@@ -32,6 +32,9 @@ enum UwbMsgType : uint8_t {
   // Reserved for the future multi-tag superframe (not used yet):
   MSG_ANNOUNCE     = 10,
   MSG_SLOT_GRANT   = 11,
+  // Anchor self-survey (Phase 1.5): tag asks an anchor to range to another anchor.
+  MSG_SURVEY_REQ   = 0x50, // tag -> anchor_A : "range to <target>"
+  MSG_SURVEY_RESP  = 0x51, // anchor_A -> tag : "<target>, dist, rxp"
 };
 
 // Header / payload layout.
@@ -46,6 +49,12 @@ static const uint8_t UWB_RANGE_LEN         = UWB_HDR_LEN + UWB_RANGE_PAYLOAD_LEN
 // RANGE_REPORT payload = float distance(m) + float rx power(dBm).
 static const uint8_t UWB_REPORT_PAYLOAD_LEN = 2 * sizeof(float);      // 8
 static const uint8_t UWB_REPORT_LEN         = UWB_HDR_LEN + UWB_REPORT_PAYLOAD_LEN; // 12
+
+// SURVEY_REQ payload = 1 byte (target anchor address).
+static const uint8_t UWB_SURVEY_REQ_LEN  = UWB_HDR_LEN + 1;           // 5
+
+// SURVEY_RESP payload = target(1) + dist_m(4) + rxPower(4).
+static const uint8_t UWB_SURVEY_RESP_LEN = UWB_HDR_LEN + 1 + 2 * sizeof(float); // 13
 
 // --- header accessors -------------------------------------------------------
 inline uint8_t frameType(const byte* f) { return f[0]; }
@@ -72,5 +81,13 @@ void unpackRangePayload(const byte* f, DW1000Time& pollSent,
 // --- RANGE_REPORT payload pack/unpack --------------------------------------
 void packReportPayload(byte* f, float distanceMeters, float rxPowerDbm);
 void unpackReportPayload(const byte* f, float& distanceMeters, float& rxPowerDbm);
+
+// --- SURVEY payload pack/unpack --------------------------------------------
+inline void    packSurveyReq(byte* f, uint8_t target) { f[UWB_HDR_LEN] = target; }
+inline uint8_t unpackSurveyReqTarget(const byte* f)   { return f[UWB_HDR_LEN]; }
+
+void packSurveyResp(byte* f, uint8_t target, float distMeters, float rxPowerDbm);
+void unpackSurveyResp(const byte* f, uint8_t& target,
+                      float& distMeters, float& rxPowerDbm);
 
 #endif // UWBRTLS_UWBFRAME_H

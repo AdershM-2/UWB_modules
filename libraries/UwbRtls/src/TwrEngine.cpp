@@ -138,6 +138,39 @@ bool TwrEngine::rangeTo(uint8_t anchorAddr, float& distanceMeters, float& rxPowe
 }
 
 // ===========================================================================
+// TAG (survey initiator) — ask an anchor to range to another anchor
+// ===========================================================================
+bool TwrEngine::surveyRequest(uint8_t anchorAddr, uint8_t targetAddr,
+                               float& distanceMeters, float& rxPowerDbm) {
+  _seq++;
+
+  // Send SURVEY_REQ to anchorAddr telling it to range to targetAddr.
+  DW1000.newTransmit();
+  DW1000.setDefaults();
+  writeHeader(_tx, MSG_SURVEY_REQ, _myAddr, anchorAddr, _seq);
+  packSurveyReq(_tx, targetAddr);
+  DW1000.setData(_tx, UWB_SURVEY_REQ_LEN);
+  DW1000.startTransmit();
+  if (!waitSent(20)) { startRx(); return false; }
+
+  // Wait for the anchor to complete its own TWR exchange and reply.
+  // Budget: reply_delay(5ms) + TWR frames(~20ms) + resp TX(~5ms) + margin.
+  startRx();
+  if (!waitReceived(200)) { startRx(); return false; }
+  readFrame();
+
+  uint8_t target;
+  if (frameType(_rx) != MSG_SURVEY_RESP || frameSrc(_rx) != anchorAddr ||
+      !frameIsForUs(_rx, _myAddr)) {
+    startRx(); return false;
+  }
+  unpackSurveyResp(_rx, target, distanceMeters, rxPowerDbm);
+  startRx();
+  // Zero distance means the anchor's ranging attempt failed.
+  return (target == targetAddr) && (distanceMeters > 0.0f);
+}
+
+// ===========================================================================
 // ANCHOR (responder)
 // ===========================================================================
 void TwrEngine::serviceResponder() {
@@ -208,6 +241,22 @@ void TwrEngine::serviceResponder() {
 
     _lastDistance = dist;
     _lastPeer     = src;
+    startRx();
+
+  } else if (type == MSG_SURVEY_REQ) {
+    // Anchor temporarily acts as initiator to range to the requested target.
+    uint8_t target = unpackSurveyReqTarget(_rx);
+    float dist = 0.0f, rxp = 0.0f;
+    bool ok = rangeTo(target, dist, rxp);  // uses tag-side path; radio re-armed on return
+
+    // Reply with result regardless of success so the tag's timeout doesn't fire.
+    DW1000.newTransmit();
+    DW1000.setDefaults();
+    writeHeader(_tx, MSG_SURVEY_RESP, _myAddr, src, seq);
+    packSurveyResp(_tx, target, ok ? dist : 0.0f, ok ? rxp : 0.0f);
+    DW1000.setData(_tx, UWB_SURVEY_RESP_LEN);
+    DW1000.startTransmit();
+    waitSent(30);
     startRx();
 
   } else {

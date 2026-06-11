@@ -34,6 +34,9 @@ static const uint16_t HOST_PORT = 5005;
 #endif
 // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
+// Number of ranging samples averaged per anchor pair during self-survey.
+static const uint16_t SURVEY_SAMPLES = 100;
+
 TwrEngine    engine;
 UwbScheduler scheduler;
 HostLink     host;
@@ -56,7 +59,62 @@ void setup() {
   Serial.printf("Tag 0x%02X ready, %u anchors\n", TAG_ID, N_ANCHORS);
 }
 
+// Anchor self-survey — send "SURVEY\n" over serial to trigger.
+// Wire format out: SURVEY_BEGIN,v1,<pairs> / SURVEY,v1,<src>,<dst>,<mm>,<ok> / SURVEY_DONE,v1
+static void runSurvey() {
+  uint8_t pairs = (N_ANCHORS * (N_ANCHORS - 1)) / 2;
+  char buf[64];
+  snprintf(buf, sizeof(buf), "SURVEY_BEGIN,v1,%u\n", pairs);
+  host.sendRaw(buf);
+  Serial.printf("Survey: %u anchors, %u pairs, %u samples each\n",
+                N_ANCHORS, pairs, SURVEY_SAMPLES);
+
+  uint8_t pairIdx = 0;
+  for (uint8_t i = 0; i < N_ANCHORS; i++) {
+    for (uint8_t j = i + 1; j < N_ANCHORS; j++) {
+      uint8_t a = ANCHORS[i], b = ANCHORS[j];
+      float   sum = 0.0f;
+      uint16_t ok = 0;
+      pairIdx++;
+      Serial.printf("  Pair %u/%u  0x%02X -> 0x%02X:\n", pairIdx, pairs, a, b);
+
+      for (uint16_t s = 0; s < SURVEY_SAMPLES; s++) {
+        float dist, rxp;
+        if (engine.surveyRequest(a, b, dist, rxp)) { sum += dist; ok++; }
+        if ((s & 0xF) == 0xF)
+          Serial.printf("    [%u/%u ok=%u]\n", s + 1, SURVEY_SAMPLES, ok);
+        delay(5);
+      }
+
+      if (ok >= SURVEY_SAMPLES / 4) {
+        uint32_t mm = (uint32_t)lroundf(sum / ok * 1000.0f);
+        snprintf(buf, sizeof(buf), "SURVEY,v1,%u,%u,%lu,%u\n", a, b, mm, ok);
+        host.sendRaw(buf);
+        Serial.printf("  => %.3f m  (%u/%u ok)\n", sum / ok, ok, SURVEY_SAMPLES);
+      } else {
+        Serial.printf("  FAILED (ok=%u/%u)\n", ok, SURVEY_SAMPLES);
+      }
+    }
+  }
+  host.sendRaw("SURVEY_DONE,v1\n");
+  Serial.println("Survey complete.");
+}
+
 void loop() {
+  // Non-blocking serial command check.
+  static char cmdBuf[16];
+  static uint8_t cmdLen = 0;
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+    if (c == '\n' || c == '\r') {
+      cmdBuf[cmdLen] = '\0';
+      if (strcmp(cmdBuf, "SURVEY") == 0) runSurvey();
+      cmdLen = 0;
+    } else if (cmdLen < sizeof(cmdBuf) - 1) {
+      cmdBuf[cmdLen++] = c;
+    }
+  }
+
   uint8_t good = scheduler.sweep();
 
   ImuSample s;

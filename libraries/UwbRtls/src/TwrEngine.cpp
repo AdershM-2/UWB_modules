@@ -82,6 +82,16 @@ uint16_t TwrEngine::readFrame() {
 // TAG (initiator)
 // ===========================================================================
 bool TwrEngine::rangeTo(uint8_t anchorAddr, float& distanceMeters, float& rxPowerDbm) {
+  // Watchdog: too many straight failures means the DW1000 receiver is wedged
+  // (RXAUTR hardware re-arm has a documented erratum on certain error types).
+  // A full configure()+startRx() always recovers it.
+  if (_failStreak >= FAIL_STREAK_RESET) {
+    Serial.printf("[TWR] radio reset after %u consecutive failures\n", _failStreak);
+    _failStreak = 0;
+    configure();
+    startRx();
+  }
+
   _seq++;
 
   // 1) POLL (immediate). Record our TX timestamp afterwards.
@@ -90,17 +100,16 @@ bool TwrEngine::rangeTo(uint8_t anchorAddr, float& distanceMeters, float& rxPowe
   writeHeader(_tx, MSG_POLL, _myAddr, anchorAddr, _seq);
   DW1000.setData(_tx, UWB_HDR_LEN);
   DW1000.startTransmit();
-  if (!waitSent(20)) { startRx(); return false; }
+  if (!waitSent(20)) { startRx(); _failStreak++; return false; }
   DW1000.getTransmitTimestamp(_timePollSent);
 
   // Listen for POLL_ACK.
   startRx();
-  if (!waitReceived(30)) { startRx(); return false; }
+  if (!waitReceived(30)) { startRx(); _failStreak++; return false; }
   readFrame();
   if (frameType(_rx) != MSG_POLL_ACK || frameSrc(_rx) != anchorAddr ||
       !frameIsForUs(_rx, _myAddr)) {
-    startRx();
-    return false;
+    startRx(); _failStreak++; return false;
   }
   DW1000.getReceiveTimestamp(_timePollAckReceived);
 
@@ -113,17 +122,17 @@ bool TwrEngine::rangeTo(uint8_t anchorAddr, float& distanceMeters, float& rxPowe
   packRangePayload(_tx, _timePollSent, _timePollAckReceived, _timeRangeSent);
   DW1000.setData(_tx, UWB_RANGE_LEN);
   DW1000.startTransmit();
-  if (!waitSent(30)) { startRx(); return false; }
+  if (!waitSent(30)) { startRx(); _failStreak++; return false; }
 
   // Listen for RANGE_REPORT (anchor computed the distance).
   startRx();
-  if (!waitReceived(40)) { startRx(); return false; }
+  if (!waitReceived(40)) { startRx(); _failStreak++; return false; }
   readFrame();
   if (frameType(_rx) != MSG_RANGE_REPORT || frameSrc(_rx) != anchorAddr) {
-    startRx();
-    return false;
+    startRx(); _failStreak++; return false;
   }
   unpackReportPayload(_rx, distanceMeters, rxPowerDbm);
+  _failStreak = 0;
   startRx();
   return true;
 }
@@ -132,8 +141,21 @@ bool TwrEngine::rangeTo(uint8_t anchorAddr, float& distanceMeters, float& rxPowe
 // ANCHOR (responder)
 // ===========================================================================
 void TwrEngine::serviceResponder() {
+  // Watchdog: if the receiver has been silent too long, the DW1000 is wedged.
+  // Reset it so the anchor doesn't go permanently deaf.
+  uint32_t now = millis();
+  if (_lastRxMs == 0) _lastRxMs = now;   // initialise on first call
+  if (now - _lastRxMs > ANCHOR_RX_WATCHDOG_MS) {
+    Serial.printf("[TWR] anchor RX watchdog fired (%lu ms silent) - resetting\n",
+                  now - _lastRxMs);
+    _lastRxMs = now;
+    configure();
+    startRx();
+  }
+
   if (!_receivedFlag) return;
   _receivedFlag = false;
+  _lastRxMs = millis();
 
   readFrame();
   if (!frameIsForUs(_rx, _myAddr)) { startRx(); return; }

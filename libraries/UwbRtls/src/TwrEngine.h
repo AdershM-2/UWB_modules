@@ -73,6 +73,16 @@ private:
   float   _lastDistance = 0.0f;
   uint8_t _lastPeer     = UWB_ADDR_INVALID;
 
+  // TAG watchdog: consecutive failures → full radio reset.
+  static constexpr uint8_t FAIL_STREAK_RESET = 5;
+  uint8_t _failStreak = 0;
+
+  // ANCHOR watchdog: if no frame received for this many ms, reset the radio.
+  // The DW1000 RXAUTR erratum means the receiver can wedge after a CRC/LDE
+  // error and never fire the ISR again — a time-based reset catches it.
+  static constexpr uint32_t ANCHOR_RX_WATCHDOG_MS = 500;
+  uint32_t _lastRxMs = 0;
+
   // ISR trampolines + flags (single engine instance per device).
   static TwrEngine* _instance;
   static volatile bool _sentFlag;

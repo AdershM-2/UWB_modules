@@ -75,6 +75,10 @@
   enhanced,breakable,colback=lightred,colframe=dkred,
   boxrule=0.5pt,arc=3pt,left=6pt,right=6pt
 }
+\newtcolorbox{codehwbox}{
+  enhanced,breakable,colback=lightyellow,colframe=dkorange,
+  boxrule=0.5pt,arc=3pt,left=6pt,right=6pt
+}
 
 %% ---- Difficulty badge -------------------------------------------------------
 \newcommand{\easy}{\textcolor{dkgreen}{\textbf{Easy}}}
@@ -83,6 +87,8 @@
 \newcommand{\hard}{\textcolor{dkred}{\textbf{Hard}}}
 \newcommand{\vhard}{\textcolor{dkred}{\textbf{Very Hard}}}
 \newcommand{\done}{\texorpdfstring{\textcolor{dkgreen}{$\checkmark$~\textbf{Done}}}{[Done]}}
+\newcommand{\codehwdone}{\texorpdfstring{\textcolor{dkorange}{$\checkmark$~\textbf{Code Done (HW pending)}}}{[Code Done, HW pending]}}
+\newcommand{\pendingopt}{\texorpdfstring{\textcolor{dkred}{\faExclamationTriangle~\textbf{PENDING}}}{[PENDING]}}
 
 %% =============================================================================
 \begin{document}
@@ -242,6 +248,10 @@ Expected improvement: 3--10\,cm $\to$ 2--6\,cm XY.
 
 \subsection{1.0 Switch to 64\,MHz PRF Accuracy Mode\dif{\easy}}
 
+\begin{codehwbox}
+\textbf{Status (2026-06-10):} \codehwdone{} --- \texttt{UWB\_RADIO\_MODE} changed to \texttt{MODE\_LONGDATA\_RANGE\_ACCURACY} and \texttt{UWB\_REPLY\_DELAY\_US} reduced 7000\,$\to$\,6000\,µs in \texttt{UwbConfig.h} (single-source, applies to all boards). \textbf{Hardware follow-up:} reflash all 4 boards, re-run calibration (antenna delay values change between PRF modes).
+\end{codehwbox}
+
 \textbf{Change:} \texttt{DW1000.enableMode(MODE\_LONGDATA\_RANGE\_LOWPOWER)} $\to$ \texttt{MODE\_LONGDATA\_RANGE\_ACCURACY} in \texttt{UwbConfig.h}.
 
 \textbf{Why:} 64\,MHz PRF produces a sharper autocorrelation peak in the channel impulse response. The receiver can more reliably identify the first-path arrival and reject multipath peaks arriving slightly later. The Pro boards already have a PA/LNA amplifier for range --- this switch improves accuracy, not range.
@@ -251,6 +261,10 @@ Expected improvement: 3--10\,cm $\to$ 2--6\,cm XY.
 \textbf{Removes:} 1--3\,cm systematic ranging error from multipath peak ambiguity.
 
 \subsection{1.1 Better Calibration\dif{\easy}}
+
+\begin{codehwbox}
+\textbf{Status (2026-06-10):} \codehwdone{} --- \texttt{SAMPLES\_PER\_STEP} 40\,$\to$\,200, \texttt{SEARCH\_ITERS} 12\,$\to$\,14, and loop counter widened to \texttt{uint16\_t} (prevents silent wrap at $>$255) in \textbf{both} \texttt{AntennaCalibration.ino} copies (\texttt{sketches/} active + \texttt{libraries/.../examples/} reference). Post-calibration loop throttled to 1\,Hz; calibrated delay printed on every line. \textbf{Hardware follow-up:} run calibration on each board, validate at two distances ($\approx$1.5\,m and $\approx$5\,m, agree within $\pm$2\,cm).
+\end{codehwbox}
 
 \textbf{Change:} \texttt{SAMPLES\_PER\_STEP} 40 $\to$ 200; \texttt{SEARCH\_ITERS} 12 $\to$ 14 in \texttt{AntennaCalibration.ino}.
 
@@ -262,15 +276,27 @@ Expected improvement: 3--10\,cm $\to$ 2--6\,cm XY.
 
 \subsection{1.2 Adaptive Polling + Age-Gated Anchor Eviction\dif{\easy}}
 
+\begin{donebox}
+\textbf{Status (2026-06-11):} \done{} --- \texttt{UwbScheduler} now tracks per-anchor \texttt{\_failStreak}, \texttt{\_skipSweeps}, and \texttt{\_backoffMult}. After 3 consecutive failures the anchor is skipped; skip duration doubles each subsequent timeout: 5\,$\to$\,10\,$\to$\,20\,$\to$\,40 sweeps (capped). Serial prints \texttt{[SCHED]} on skip and on recovery. MATLAB age-gated eviction was already complete. Library-only change --- no reflash required.
+\end{donebox}
+
 \textbf{Firmware (remaining):} Add \texttt{failCount[N]} per anchor in \texttt{UwbScheduler}. After 3 consecutive timeouts, skip that anchor for 5 sweeps then retry with exponential backoff. This avoids wasting 100\,ms per dead anchor per sweep.
 
 \textbf{MATLAB:} \done{} --- \texttt{anchorLastSeen} struct with \texttt{tic}/\texttt{toc} tracking; \texttt{AGE\_GATE\_SEC = 3.0} evicts stale range history automatically.
 
 \subsection{1.3 Faster Sweep Rate\dif{\medium}}
 
-\textbf{Option A (safe):} Reduce \texttt{UWB\_REPLY\_DELAY\_US} 7000 $\to$ 5500\,µs. Verify exchanges still complete.
+\begin{codehwbox}
+\textbf{Status Option A (2026-06-11):} \codehwdone{} --- \texttt{UWB\_REPLY\_DELAY\_US} reduced 6000\,$\to$\,5000\,µs (previous was 7000\,µs before Phase\,1.0). Estimated sweep rate improvement: $\sim$8\,Hz\,$\to$\,$\sim$10\,Hz (4 anchors). Minimum safe value for 110\,kbps / 64\,MHz PRF mode is $\approx$3500\,µs; 5000\,µs leaves $\approx$1.5\,ms margin above ESP32 SPI + DW1000 processing time. \textbf{Hardware follow-up:} reflash all boards; if exchange failure rate increases, revert to 6000\,µs.
+\end{codehwbox}
 
-\textbf{Option B (aggressive):} Switch to \texttt{MODE\_SHORTDATA\_FAST\_LOWPOWER} (6.8\,Mbps, 64-symbol preamble). Reply delay drops to $\sim$1500\,µs giving 8--10\,Hz for 3 anchors. Cost: $\sim$2\,m range reduction (acceptable for $\leq$15\,m indoor use).
+\begin{warnbox}
+\textbf{Option B --- \pendingopt{}} Switch to \texttt{MODE\_SHORTDATA\_FAST\_LOWPOWER} (6.8\,Mbps, 64-symbol preamble, reply delay $\sim$1500\,µs). Estimated $\sim$35--45\,Hz for 4 anchors. \textbf{Deferred:} trades 64\,MHz PRF accuracy for speed --- increases multipath sensitivity in small rooms. Defer until Phase\,2.1 NLOS detection is in place to compensate.
+\end{warnbox}
+
+\textbf{Option A (safe):} Reduce \texttt{UWB\_REPLY\_DELAY\_US} 6000 $\to$ 5000\,µs. Saves 2\,ms per exchange, $\sim$8\,ms per sweep with 4 anchors.
+
+\textbf{Option B (aggressive):} Switch to \texttt{MODE\_SHORTDATA\_FAST\_LOWPOWER} (6.8\,Mbps, 64-symbol preamble). Reply delay drops to $\sim$1500\,µs giving $\sim$35--45\,Hz for 4 anchors. Cost: increased multipath sensitivity (16\,MHz PRF vs 64\,MHz PRF).
 
 Higher sweep rate directly improves all filter layers downstream.
 
@@ -499,10 +525,10 @@ Precompute $(A^\top A)^{-1}$ once at startup (anchors are fixed). Position updat
 \midrule
 \multicolumn{4}{l}{\textit{Phase 1 --- Foundation}} \\
 \midrule
-1.0 & Switch to 64\,MHz PRF (\texttt{MODE\_LONGDATA\_RANGE\_ACCURACY}) & \easy & Pending \\
-1.1 & Better calibration (200 samples, multi-distance) & \easy & Pending \\
-1.2 & Adaptive polling --- skip dead anchors (firmware) & \easy & Partial \\
-1.3 & Faster sweep rate (reduce reply delay / mode change) & \medium & Pending \\
+1.0 & Switch to 64\,MHz PRF (\texttt{MODE\_LONGDATA\_RANGE\_ACCURACY}) & \easy & \codehwdone \\
+1.1 & Better calibration (200 samples, multi-distance) & \easy & \codehwdone \\
+1.2 & Adaptive polling --- skip dead anchors (firmware) & \easy & \done \\
+1.3 & Faster sweep rate --- Option A \codehwdone; Option B \pendingopt & \medium & Partial \\
 1.5 & Anchor self-survey + auto \texttt{anchors.json} & \medium & Pending \\
 \midrule
 \multicolumn{4}{l}{\textit{Phase 2 --- Ranging Quality}} \\
@@ -572,12 +598,16 @@ Phase 5+ & 1--3\,cm  & 2--5\,cm & 3--5$^\circ$ & 100\,Hz RPY & Reliability, powe
 \begin{center}
 \renewcommand{\arraystretch}{1.4}
 \begin{tabular}{ccccccccccccc}
-1.0 & $\to$ & 1.1 & $\to$ & 1.2 & $\to$ & 1.5 & $\to$ & 1.3 & $\to$ & 2.1 & $\to$ & 2.2 \\
-PRF && Cal && Poll && Survey && Rate && NLOS && Wgt \\[4pt]
+\textcolor{dkgreen}{\textbf{1.0}} & $\to$ & \textcolor{dkgreen}{\textbf{1.1}} & $\to$ & \textcolor{dkgreen}{\textbf{1.2}} & $\to$ & \textcolor{dkgreen}{\textbf{1.3A}} & $\to$ & 1.5 & $\to$ & 2.1 & $\to$ & 2.2 \\
+\textcolor{dkgreen}{PRF} && \textcolor{dkgreen}{Cal} && \textcolor{dkgreen}{Poll} && \textcolor{dkgreen}{Rate-A} && Survey && NLOS && Wgt \\[4pt]
 $\to$ & 2.4 & $\to$ & 3.1 & $\to$ & 4.1 & $\to$ & 4.2 & $\to$ & 4.3 & $\to$ & 4.4 & \\
 & Plot && CA-EKF && 4th Anchor && IMU && RPY && Fusion &
 \end{tabular}
 \end{center}
+
+\medskip
+\noindent\textcolor{dkgreen}{Green} = code complete. \textcolor{dkorange}{Orange} = code done, hardware follow-up pending.
+\textcolor{dkred}{Red} items (1.3B fast mode) deferred until Phase\,2.1 NLOS detection is in place.
 
 \bigskip
 Phases 2.5, 3.2, 3.3, 3.4, 4.5, and all of Phases 5--6 can be added in any order after 4.4 is stable.

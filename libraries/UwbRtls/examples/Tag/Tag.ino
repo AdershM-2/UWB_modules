@@ -18,6 +18,9 @@
 
 #include <UwbRtls.h>
 
+// v1.5: 64 MHz PRF, 5 ms reply, dead-anchor backoff, self-survey (Phase 1.0/1.2/1.3A/1.5)
+#define FIRMWARE_VERSION "v1.5"
+
 // >>>>>>>>>>>>>>>>> CONFIGURE <<<<<<<<<<<<<<<<<<
 static const uint8_t  TAG_ID        = UWB_ADDR_TAG_BASE;  // 0xF0
 static const uint16_t ANTENNA_DELAY = 16384;              // calibrated tag delay
@@ -56,7 +59,7 @@ void setup() {
   imu.begin();    // false until the BNO085 driver is implemented
   oled.begin();
   engine.printDeviceId();
-  Serial.printf("Tag 0x%02X ready, %u anchors\n", TAG_ID, N_ANCHORS);
+  Serial.printf("Tag 0x%02X  fw=%s  %u anchors\n", TAG_ID, FIRMWARE_VERSION, N_ANCHORS);
 }
 
 // Anchor self-survey — send "SURVEY\n" over serial to trigger.

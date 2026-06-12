@@ -21,6 +21,9 @@
 #define UWB_HOSTLINK_SERIAL
 #include <UwbRtls.h>
 
+// v1.1: 200 smp/step, 14-iter binary search (Phase 1.1)
+#define FIRMWARE_VERSION "v1.1"
+
 // >>>>>>>>>>>>>>>>> CONFIGURE <<<<<<<<<<<<<<<<<<
 static const float    TRUE_DISTANCE_M = 7.00f;   // measured tape distance
 static const uint8_t  REF_ANCHOR_ID   = 0x01;    // the reference board's ID
@@ -60,8 +63,8 @@ void setup() {
   delay(300);
   engine.begin(TWR_TAG, THIS_ID, DELAY_LOW);
   engine.printDeviceId();
-  Serial.printf("Calibrating against anchor 0x%02X at %.3f m\n",
-                REF_ANCHOR_ID, TRUE_DISTANCE_M);
+  Serial.printf("AntennaCalibration %s  ref=0x%02X  %.3f m\n",
+                FIRMWARE_VERSION, REF_ANCHOR_ID, TRUE_DISTANCE_M);
 
   uint16_t low = DELAY_LOW, high = DELAY_HIGH;
   uint16_t mid = (low + high) / 2;

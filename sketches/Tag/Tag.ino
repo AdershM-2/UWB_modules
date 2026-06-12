@@ -18,6 +18,9 @@
 
 #include <UwbRtls.h>
 
+// v1.5: 64 MHz PRF, 5 ms reply, dead-anchor backoff, self-survey (Phase 1.0/1.2/1.3A/1.5)
+#define FIRMWARE_VERSION "v1.5"
+
 // >>>>>>>>>>>>>>>>> CONFIGURE <<<<<<<<<<<<<<<<<<
 static const uint8_t  TAG_ID        = UWB_ADDR_TAG_BASE;  // 0xF0
 static const uint16_t ANTENNA_DELAY = 16466;              // calibrated tag delay
@@ -49,7 +52,7 @@ static void splashIdent() {
   snprintf(title, sizeof(title), "TAG  %02X", TAG_ID);
   snprintf(l1,    sizeof(l1),    "Delay: %u", ANTENNA_DELAY);
   snprintf(l2,    sizeof(l2),    "%u anchors", N_ANCHORS);
-  oled.showSplash(title, l1, l2, "Starting...");
+  oled.showSplash(title, l1, l2, "fw " FIRMWARE_VERSION);
 }
 
 void setup() {
@@ -73,7 +76,7 @@ void setup() {
   scheduler.begin(&engine, ANCHORS, N_ANCHORS);
   imu.begin();
   engine.printDeviceId();
-  Serial.printf("Tag 0x%02X ready, %u anchors\n", TAG_ID, N_ANCHORS);
+  Serial.printf("Tag 0x%02X  fw=%s  %u anchors\n", TAG_ID, FIRMWARE_VERSION, N_ANCHORS);
 }
 
 // ---------------------------------------------------------------------------

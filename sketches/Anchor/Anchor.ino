@@ -14,6 +14,9 @@
 
 #include <UwbRtls.h>
 
+// v1.5: 64 MHz PRF, 5 ms reply delay, survey responder (Phase 1.0/1.3A/1.5)
+#define FIRMWARE_VERSION "v1.5"
+
 // >>>>>>>>>>>>>>>>> SET PER BOARD <<<<<<<<<<<<<<<<<<
 static const uint8_t  ANCHOR_ID     = 0x03;     // unique: 0x01, 0x02, 0x03, ...
 static const uint16_t ANTENNA_DELAY = 16473;    // replace with calibrated value
@@ -26,7 +29,7 @@ static void splashIdent() {
   char title[12], l1[20];
   snprintf(title, sizeof(title), "ANCHOR %02X", ANCHOR_ID);
   snprintf(l1,    sizeof(l1),    "Delay: %u",   ANTENNA_DELAY);
-  oled.showSplash(title, l1, "Waiting...");
+  oled.showSplash(title, l1, "fw " FIRMWARE_VERSION, "Waiting...");
 }
 
 void setup() {
@@ -37,7 +40,7 @@ void setup() {
 
   engine.begin(TWR_ANCHOR, ANCHOR_ID, ANTENNA_DELAY);
   engine.printDeviceId();
-  Serial.printf("Anchor 0x%02X ready (antenna delay %u)\n", ANCHOR_ID, ANTENNA_DELAY);
+  Serial.printf("Anchor 0x%02X  fw=%s  (delay %u)\n", ANCHOR_ID, FIRMWARE_VERSION, ANTENNA_DELAY);
 }
 
 void loop() {

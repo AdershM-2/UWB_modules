@@ -157,22 +157,30 @@ bool TwrEngine::surveyRequest(uint8_t anchorAddr, uint8_t targetAddr,
   // RANGE, RANGE_REPORT between the anchor and its target) arrive here too
   // because frame filtering is off — skip them and keep waiting.
   startRx();
+  uint8_t nSkip = 0;
   uint32_t t0 = millis();
   for (;;) {
     uint32_t elapsed = millis() - t0;
     if (elapsed >= 200) break;
     if (!waitReceived(200 - elapsed)) break;
     readFrame();
+    uint8_t type = frameType(_rx);
     uint8_t target;
-    if (frameType(_rx) == MSG_SURVEY_RESP &&
+    if (type == MSG_SURVEY_RESP &&
         frameSrc(_rx) == anchorAddr &&
         frameIsForUs(_rx, _myAddr)) {
       unpackSurveyResp(_rx, target, distanceMeters, rxPowerDbm);
+      Serial.printf("    [SRV] 0x%02X->0x%02X ok  d=%.4f m  skip=%u\n",
+                    anchorAddr, targetAddr, distanceMeters, nSkip);
       startRx();
       return (target == targetAddr) && (distanceMeters > 0.0f);
     }
-    // Not our frame — DW1000 auto-re-arms in permanent-receive mode; keep waiting.
+    if (nSkip == 0)
+      Serial.printf("    [SRV] 0x%02X->0x%02X skip type=0x%02X src=0x%02X\n",
+                    anchorAddr, targetAddr, type, frameSrc(_rx));
+    nSkip++;
   }
+  Serial.printf("    [SRV] 0x%02X->0x%02X timeout  skip=%u\n", anchorAddr, targetAddr, nSkip);
   startRx();
   return false;
 }

@@ -85,7 +85,9 @@ static void runSurvey() {
         float dist, rxp;
         if (engine.surveyRequest(a, b, dist, rxp)) { sum += dist; ok++; }
         if ((s & 0xF) == 0xF)
-          Serial.printf("    [%u/%u ok=%u]\n", s + 1, SURVEY_SAMPLES, ok);
+          Serial.printf("    [%u/%u ok=%u avg=%.4fm]\n",
+                        s + 1, SURVEY_SAMPLES, ok,
+                        ok ? sum / ok : 0.0f);
         delay(5);
       }
 

@@ -115,7 +115,9 @@ static void runSurvey() {
           ok++;
         }
         if ((s & 0xF) == 0xF) {
-          Serial.printf("    [%u/%u ok=%u]\n", s + 1, SURVEY_SAMPLES, ok);
+          Serial.printf("    [%u/%u ok=%u avg=%.4fm]\n",
+                        s + 1, SURVEY_SAMPLES, ok,
+                        ok ? sum / ok : 0.0f);
           snprintf(oledL2, sizeof(oledL2), "%u/%u ok=%u", s+1, SURVEY_SAMPLES, ok);
           oled.showSplash("SURVEY", oledL1, oledL2);
         }

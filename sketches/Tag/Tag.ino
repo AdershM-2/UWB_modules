@@ -30,9 +30,9 @@ static const uint8_t ANCHORS[]  = { 0x01, 0x02, 0x03 };
 static const uint8_t N_ANCHORS  = sizeof(ANCHORS) / sizeof(ANCHORS[0]);
 
 #if defined(UWB_HOSTLINK_UDP)
-static const char*    WIFI_SSID  = "Biriyani";
-static const char*    WIFI_PASS  = "Legpiece";
-static IPAddress      HOST_IP(192, 168, 1, 101);   // MATLAB PC
+static const char*    WIFI_SSID  = "iitk";
+static const char*    WIFI_PASS  = "";              // open network
+static IPAddress      HOST_IP(172, 29, 110, 69);   // MATLAB PC
 static const uint16_t HOST_PORT  = 5005;
 #endif
 // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<

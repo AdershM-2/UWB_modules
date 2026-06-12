@@ -153,21 +153,28 @@ bool TwrEngine::surveyRequest(uint8_t anchorAddr, uint8_t targetAddr,
   DW1000.startTransmit();
   if (!waitSent(20)) { startRx(); return false; }
 
-  // Wait for the anchor to complete its own TWR exchange and reply.
-  // Budget: reply_delay(5ms) + TWR frames(~20ms) + resp TX(~5ms) + margin.
+  // Wait for SURVEY_RESP. The anchor's internal TWR frames (POLL, POLL_ACK,
+  // RANGE, RANGE_REPORT between the anchor and its target) arrive here too
+  // because frame filtering is off — skip them and keep waiting.
   startRx();
-  if (!waitReceived(200)) { startRx(); return false; }
-  readFrame();
-
-  uint8_t target;
-  if (frameType(_rx) != MSG_SURVEY_RESP || frameSrc(_rx) != anchorAddr ||
-      !frameIsForUs(_rx, _myAddr)) {
-    startRx(); return false;
+  uint32_t t0 = millis();
+  for (;;) {
+    uint32_t elapsed = millis() - t0;
+    if (elapsed >= 200) break;
+    if (!waitReceived(200 - elapsed)) break;
+    readFrame();
+    uint8_t target;
+    if (frameType(_rx) == MSG_SURVEY_RESP &&
+        frameSrc(_rx) == anchorAddr &&
+        frameIsForUs(_rx, _myAddr)) {
+      unpackSurveyResp(_rx, target, distanceMeters, rxPowerDbm);
+      startRx();
+      return (target == targetAddr) && (distanceMeters > 0.0f);
+    }
+    // Not our frame — DW1000 auto-re-arms in permanent-receive mode; keep waiting.
   }
-  unpackSurveyResp(_rx, target, distanceMeters, rxPowerDbm);
   startRx();
-  // Zero distance means the anchor's ranging attempt failed.
-  return (target == targetAddr) && (distanceMeters > 0.0f);
+  return false;
 }
 
 // ===========================================================================

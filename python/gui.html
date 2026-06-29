@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>UWB RTLS Tracker</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#080c10;--bg2:#0d1219;--bg3:#111820;--border:#1e2d3d;--accent:#00d4ff;--accent2:#00ff9d;--warn:#ff9d00;--danger:#ff3d5a;--text:#c8dae8;--muted:#4a6070;--mono:'Share Tech Mono',monospace;--sans:'Barlow',sans-serif}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);height:100vh;display:grid;grid-template-rows:48px 1fr;grid-template-columns:1fr 300px;gap:1px;background-color:var(--border);overflow:hidden}
+header{grid-column:1/-1;background:var(--bg2);display:flex;align-items:center;padding:0 20px;gap:16px;border-bottom:1px solid var(--border)}
+.logo{font-family:var(--mono);font-size:13px;color:var(--accent);letter-spacing:3px;text-transform:uppercase}.logo span{color:var(--muted)}
+.status-dot{width:8px;height:8px;border-radius:50%;background:var(--muted);transition:background .3s;flex-shrink:0}
+.status-dot.live{background:var(--accent2);box-shadow:0 0 8px var(--accent2);animation:pulse 2s infinite}
+.status-dot.stale{background:var(--warn);box-shadow:0 0 6px var(--warn)}
+.status-dot.error{background:var(--danger)}
+#status-text{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.header-right{margin-left:auto;display:flex;gap:20px;align-items:center}
+.hstat{text-align:right}.hstat .val{font-family:var(--mono);font-size:15px;color:var(--accent)}.hstat .lbl{font-size:9px;color:var(--muted);letter-spacing:1px;text-transform:uppercase}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+#map-wrap{background:var(--bg);position:relative;overflow:hidden}
+canvas{display:block}
+#map-wrap::before{content:'';position:absolute;inset:0;background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);background-size:40px 40px;opacity:.35;pointer-events:none}
+.bracket{position:absolute;width:20px;height:20px;border-color:var(--accent);border-style:solid;opacity:.5}
+.bracket.tl{top:12px;left:12px;border-width:1px 0 0 1px}.bracket.tr{top:12px;right:12px;border-width:1px 1px 0 0}.bracket.bl{bottom:12px;left:12px;border-width:0 0 1px 1px}.bracket.br{bottom:12px;right:12px;border-width:0 1px 1px 0}
+aside{background:var(--bg2);display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden}
+.panel{border-bottom:1px solid var(--border);padding:14px 16px}
+.panel-title{font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;margin-bottom:12px}
+.coord-row{display:flex;align-items:baseline;gap:6px;margin-bottom:6px}
+.coord-axis{font-family:var(--mono);font-size:11px;color:var(--muted);width:14px}
+.coord-val{font-family:var(--mono);font-size:28px;color:var(--accent);line-height:1;letter-spacing:-1px}
+.coord-unit{font-size:11px;color:var(--muted)}
+.rmse-wrap{margin-top:10px}.rmse-label{display:flex;justify-content:space-between;margin-bottom:4px}.rmse-label span{font-family:var(--mono);font-size:11px}.rmse-label .key{color:var(--muted)}.rmse-label .rmse-val{color:var(--accent2)}
+.bar-track{height:4px;background:var(--bg3);border-radius:2px;overflow:hidden}.bar-fill{height:100%;border-radius:2px;background:var(--accent2);transition:width .3s,background .3s}
+.anchor-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.anchor-id{font-family:var(--mono);font-size:10px;color:var(--bg);background:var(--warn);border-radius:3px;padding:1px 5px;flex-shrink:0}
+.anchor-dist-bar{flex:1;height:3px;background:var(--bg3);border-radius:2px;overflow:hidden}
+.anchor-dist-fill{height:100%;background:var(--warn);border-radius:2px;transition:width .3s}
+.anchor-dist-val{font-family:var(--mono);font-size:12px;color:var(--text);min-width:52px;text-align:right}
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stat-box{background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:8px 10px}
+.stat-box .val{font-family:var(--mono);font-size:16px;color:var(--text)}.stat-box .lbl{font-size:9px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-top:2px}
+.controls{display:flex;gap:8px;flex-wrap:wrap}
+.btn{font-family:var(--mono);font-size:11px;letter-spacing:1px;padding:5px 10px;border-radius:3px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;transition:border-color .2s,color .2s;text-transform:uppercase}
+.btn:hover{border-color:var(--accent);color:var(--accent)}.btn.active{border-color:var(--accent2);color:var(--accent2)}
+.ws-row{display:flex;gap:6px;margin-top:8px}
+.ws-input{flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:var(--mono);font-size:12px;padding:5px 8px;outline:none}.ws-input:focus{border-color:var(--accent)}
+.tune-row{display:flex;align-items:center;gap:6px;margin-bottom:10px}.tune-row label{font-family:var(--mono);font-size:10px;color:var(--muted);min-width:90px}.tune-row input[type=range]{flex:1;accent-color:var(--accent)}.tune-val{font-family:var(--mono);font-size:11px;color:var(--accent);min-width:44px;text-align:right}
+/* Calibration panel */
+.calib-anchor-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.calib-anchor-id{font-family:var(--mono);font-size:10px;color:var(--bg);background:var(--accent);border-radius:3px;padding:1px 5px;flex-shrink:0;min-width:24px;text-align:center}
+.calib-bias-val{font-family:var(--mono);font-size:13px;min-width:76px}
+.calib-bias-val.good{color:var(--accent2)}.calib-bias-val.warn{color:var(--warn)}.calib-bias-val.bad{color:var(--danger)}
+.calib-std-val{font-family:var(--mono);font-size:10px;color:var(--muted);min-width:56px}
+.calib-n-val{font-family:var(--mono);font-size:10px;color:var(--muted)}
+/* Survey panel */
+.survey-status{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.survey-dot{width:10px;height:10px;border-radius:50%;background:var(--muted);flex-shrink:0;transition:background .3s,box-shadow .3s}
+.survey-dot.active{background:var(--accent);box-shadow:0 0 10px var(--accent);animation:pulse 1s infinite}
+.survey-dot.done{background:var(--accent2);box-shadow:0 0 10px var(--accent2)}
+.survey-dot.error{background:var(--danger)}
+.survey-label{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.survey-progress{margin-bottom:10px}
+.survey-progress .bar-track{height:6px;margin-top:4px}
+.survey-count{font-family:var(--mono);font-size:10px;color:var(--muted);display:flex;justify-content:space-between}
+.survey-count .val{color:var(--accent)}
+.btn-survey{background:linear-gradient(135deg,rgba(0,212,255,0.15),rgba(0,255,157,0.1));border-color:var(--accent);color:var(--accent);position:relative;overflow:hidden}
+.btn-survey:hover{background:linear-gradient(135deg,rgba(0,212,255,0.3),rgba(0,255,157,0.2));color:#fff}
+.btn-survey:disabled{opacity:0.4;cursor:not-allowed}
+.btn-survey .shimmer{position:absolute;inset:0;background:linear-gradient(90deg,transparent 0%,rgba(0,212,255,0.15) 50%,transparent 100%);animation:shimmer 2s infinite}
+@keyframes shimmer{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+.survey-captures{margin-top:8px;max-height:140px;overflow-y:auto}
+.survey-cap-row{display:flex;align-items:center;gap:6px;margin-bottom:4px;font-family:var(--mono);font-size:10px;animation:fadeIn .3s ease}
+.survey-cap-row .cap-idx{color:var(--accent);min-width:24px;font-weight:600}
+.survey-cap-row .cap-coord{color:var(--warn);min-width:60px}
+.survey-cap-row .cap-dists{color:var(--text);flex:1}
+.survey-result-box{margin-top:10px;padding:8px;background:var(--bg3);border:1px solid var(--accent2);border-radius:4px}
+.survey-result-box .lbl{font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
+.survey-result-anchor{font-family:var(--mono);font-size:11px;color:var(--text);margin-bottom:2px}
+.survey-result-anchor .aid{color:var(--warn)}
+.survey-result-anchor .coords{color:var(--accent2)}
+#log{font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.6;max-height:100px;overflow-y:auto;padding:10px 16px;flex-shrink:0}
+#log .entry{border-bottom:1px solid var(--border);padding:2px 0}#log .ts{color:var(--accent);margin-right:6px}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+/* Health strip */
+.health-strip{display:flex;flex-wrap:wrap;gap:4px;margin-top:10px}
+.health-pill{font-family:var(--mono);font-size:9px;letter-spacing:.5px;padding:2px 7px;border-radius:10px;border:1px solid;text-transform:uppercase;transition:all .3s;white-space:nowrap}
+.hp-ok{border-color:var(--accent2);color:var(--accent2);background:rgba(0,255,157,0.07)}
+.hp-warn{border-color:var(--warn);color:var(--warn);background:rgba(255,157,0,0.07)}
+.hp-off{border-color:var(--muted);color:var(--muted);background:transparent;opacity:.45}
+/* Velocity panel */
+.vel-val{font-family:var(--mono);font-size:20px;color:var(--accent2);line-height:1;letter-spacing:-1px}
+.nis-row{display:flex;align-items:center;gap:6px;margin-top:8px;font-family:var(--mono);font-size:10px}
+/* ZUPT badge */
+.zupt-badge{display:none;font-family:var(--mono);font-size:9px;letter-spacing:1px;padding:2px 8px;border-radius:10px;background:rgba(0,255,157,0.12);border:1px solid var(--accent2);color:var(--accent2);margin-top:6px}
+.zupt-badge.active{display:inline-block;animation:pulse 1.5s infinite}
+/* IMU gyro row */
+.imu-gyro-row{margin-top:6px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:7px 10px;font-family:var(--mono);font-size:11px;display:none}
+.imu-gyro-row.visible{display:block}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">UWB<span>//</span>RTLS <span style="font-size:10px;opacity:.6">PYTHON HOST</span></div>
+  <div class="status-dot" id="dot"></div>
+  <div id="status-text">DISCONNECTED</div>
+  <div class="header-right">
+    <div class="hstat"><div class="val" id="h-fps">0</div><div class="lbl">PKT/S</div></div>
+    <div class="hstat"><div class="val" id="h-total">0</div><div class="lbl">FIXES</div></div>
+    <div class="hstat"><div class="val" id="h-age">—</div><div class="lbl">AGE MS</div></div>
+  </div>
+</header>
+<div id="map-wrap">
+  <canvas id="canvas"></canvas>
+  <div class="bracket tl"></div><div class="bracket tr"></div><div class="bracket bl"></div><div class="bracket br"></div>
+</div>
+<aside>
+  <div class="panel">
+    <div class="panel-title">Position <span id="pos-tag-lbl" style="font-size:9px;margin-left:6px;font-family:var(--mono);letter-spacing:1px"></span></div>
+    <div class="coord-row"><div class="coord-axis">X</div><div class="coord-val" id="px">—</div><div class="coord-unit">m</div></div>
+    <div class="coord-row"><div class="coord-axis">Y</div><div class="coord-val" id="py">—</div><div class="coord-unit">m</div></div>
+    <div class="rmse-wrap"><div class="rmse-label"><span class="key">RMSE</span><span class="rmse-val" id="rmse-val">—</span></div><div class="bar-track"><div class="bar-fill" id="rmse-bar" style="width:0%"></div></div></div>
+    <div class="health-strip">
+      <div class="health-pill hp-off" id="hp-imu">IMU: --</div>
+      <div class="health-pill hp-off" id="hp-ekf">EKF: --</div>
+      <div class="health-pill hp-off" id="hp-zupt">ZUPT: off</div>
+      <div class="health-pill hp-off" id="hp-uwb">UWB: --</div>
+    </div>
+  </div>
+  <div class="panel" id="imu-panel">
+    <div class="panel-title">Orientation (IMU)</div>
+    <div class="coord-row"><div class="coord-axis" style="color:#a78bfa">R</div><div class="coord-val" id="imu-roll" style="font-size:22px;color:#a78bfa">—</div><div class="coord-unit">°</div></div>
+    <div class="coord-row"><div class="coord-axis" style="color:#a78bfa">P</div><div class="coord-val" id="imu-pitch" style="font-size:22px;color:#a78bfa">—</div><div class="coord-unit">°</div></div>
+    <div class="coord-row"><div class="coord-axis" style="color:#a78bfa">Y</div><div class="coord-val" id="imu-yaw" style="font-size:22px;color:#a78bfa">—</div><div class="coord-unit">°</div></div>
+    <div style="margin-top:8px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:7px 10px;font-family:var(--mono);font-size:11px">
+      <div style="color:var(--muted);font-size:9px;letter-spacing:1px;text-transform:uppercase;margin-bottom:5px">Linear Accel m/s²</div>
+      <div style="display:flex;gap:12px">
+        <div><span style="color:var(--muted)">Ax</span>&nbsp;<span id="imu-ax" style="color:var(--text)">—</span></div>
+        <div><span style="color:var(--muted)">Ay</span>&nbsp;<span id="imu-ay" style="color:var(--text)">—</span></div>
+        <div><span style="color:var(--muted)">Az</span>&nbsp;<span id="imu-az" style="color:var(--text)">—</span></div>
+      </div>
+    </div>
+    <div class="imu-gyro-row" id="imu-gyro-row">
+      <div style="color:var(--muted);font-size:9px;letter-spacing:1px;text-transform:uppercase;margin-bottom:5px">Angular Vel rad/s</div>
+      <div style="display:flex;gap:12px">
+        <div><span style="color:var(--muted)">Gx</span>&nbsp;<span id="imu-gx" style="color:var(--text)">—</span></div>
+        <div><span style="color:var(--muted)">Gy</span>&nbsp;<span id="imu-gy" style="color:var(--text)">—</span></div>
+        <div><span style="color:var(--muted)">Gz</span>&nbsp;<span id="imu-gz" style="color:var(--text)">—</span></div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px">
+      <div id="imu-conf" style="font-family:var(--mono);font-size:9px;color:var(--muted)"></div>
+      <div class="zupt-badge" id="zupt-badge">STATIONARY</div>
+    </div>
+  </div>
+  <div class="panel" id="vel-panel">
+    <div class="panel-title">Velocity (EKF)</div>
+    <div class="coord-row">
+      <div class="coord-axis" style="color:var(--accent2)">Vx</div>
+      <div class="vel-val" id="vel-vx">—</div>
+      <div class="coord-unit">m/s</div>
+    </div>
+    <div class="coord-row">
+      <div class="coord-axis" style="color:var(--accent2)">Vy</div>
+      <div class="vel-val" id="vel-vy">—</div>
+      <div class="coord-unit">m/s</div>
+    </div>
+    <div style="display:flex;gap:20px;margin-top:2px;font-family:var(--mono);font-size:11px">
+      <div><span style="color:var(--muted)">Spd</span>&nbsp;<span id="vel-speed" style="color:var(--accent2)">—</span>&nbsp;<span style="color:var(--muted)">m/s</span></div>
+      <div><span style="color:var(--muted)">Hdg</span>&nbsp;<span id="vel-hdg" style="color:var(--accent2)">—</span>&nbsp;<span style="color:var(--muted)">°</span></div>
+    </div>
+    <details style="margin-top:8px">
+      <summary style="font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:1px;cursor:pointer;text-transform:uppercase;list-style:none">▸ Accel Bias</summary>
+      <div style="margin-top:6px;font-family:var(--mono);font-size:11px;display:flex;gap:14px">
+        <div><span style="color:var(--muted)">Bx</span>&nbsp;<span id="vel-bx" style="color:var(--text)">—</span></div>
+        <div><span style="color:var(--muted)">By</span>&nbsp;<span id="vel-by" style="color:var(--text)">—</span></div>
+      </div>
+    </details>
+    <div class="nis-row">
+      <span style="color:var(--muted)">NIS</span>
+      <span id="nis-val" style="color:var(--text)">—</span>
+      <span id="nis-state" style="font-size:9px;padding:1px 5px;border-radius:3px;border:1px solid transparent"></span>
+      <span id="pred-mode" style="margin-left:auto;font-size:9px;padding:2px 6px;border-radius:3px;background:rgba(74,96,112,0.15);border:1px solid var(--muted);color:var(--muted)">CV</span>
+    </div>
+  </div>
+  <div class="panel" id="anchor-panel"><div class="panel-title">Anchor distances</div></div>
+  <div class="panel">
+    <div class="panel-title">Session</div>
+    <div class="stat-grid">
+      <div class="stat-box"><div class="val" id="s-minx">—</div><div class="lbl">Min X</div></div>
+      <div class="stat-box"><div class="val" id="s-maxx">—</div><div class="lbl">Max X</div></div>
+      <div class="stat-box"><div class="val" id="s-miny">—</div><div class="lbl">Min Y</div></div>
+      <div class="stat-box"><div class="val" id="s-maxy">—</div><div class="lbl">Max Y</div></div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Tuning</div>
+    <div class="tune-row"><label>FILT N</label><input type="range" min="1" max="16" value="8" step="1" id="t-filtN"><span class="tune-val" id="tv-filtN">8</span></div>
+    <div class="tune-row"><label>EKF Q</label><input type="range" min="0.001" max="0.1" value="0.005" step="0.001" id="t-ekfQ"><span class="tune-val" id="tv-ekfQ">0.005</span></div>
+    <div class="tune-row"><label>EMA α</label><input type="range" min="0.05" max="1.0" value="0.15" step="0.01" id="t-ema"><span class="tune-val" id="tv-ema">0.15</span></div>
+    <div class="tune-row"><label>GATE K</label><input type="range" min="1.5" max="5.0" value="2.5" step="0.1" id="t-gateK"><span class="tune-val" id="tv-gateK">2.5</span></div>
+    <div class="tune-row"><label>BIAS mm</label><input type="range" min="0" max="100" value="40" step="1" id="t-bias"><span class="tune-val" id="tv-bias">40</span></div>
+    <div class="tune-row"><label>σ ACCEL</label><input type="range" min="0.02" max="0.5" value="0.15" step="0.01" id="t-sigma"><span class="tune-val" id="tv-sigma">0.15</span></div>
+    <div class="tune-row"><label>ZUPT THRESH</label><input type="range" min="0.02" max="0.3" value="0.1" step="0.01" id="t-zupt"><span class="tune-val" id="tv-zupt">0.10</span></div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Session Calibration</div>
+    <div class="survey-status">
+      <div class="survey-dot" id="calib-dot"></div>
+      <span class="survey-label" id="calib-status-text">IDLE</span>
+      <span id="calib-loaded-badge" style="margin-left:auto;font-family:var(--mono);font-size:10px"></span>
+    </div>
+    <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:8px">Cal point: <span id="calib-point" style="color:var(--accent)">—</span></div>
+    <div class="survey-progress" id="calib-progress" style="display:none">
+      <div class="survey-count"><span>Samples</span><span class="val" id="calib-cap-count">0 / 500</span></div>
+      <div class="bar-track"><div class="bar-fill" id="calib-bar" style="width:0%;background:var(--accent)"></div></div>
+    </div>
+    <div id="calib-biases" style="margin:8px 0"></div>
+    <div class="controls" style="margin-top:8px">
+      <button class="btn btn-survey" id="btn-calib-start" onclick="calibStart()">▷ Calibrate</button>
+      <button class="btn btn-survey" id="btn-calib-save" onclick="calibSave()" style="display:none;border-color:var(--accent2);color:var(--accent2)">✓ Apply &amp; Save</button>
+      <button class="btn" id="btn-calib-discard" onclick="calibDiscard()" style="display:none">✗ Discard</button>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Multi-Point Survey</div>
+    <div class="survey-status">
+      <div class="survey-dot" id="survey-dot"></div>
+      <span class="survey-label" id="survey-status-text">IDLE</span>
+      <span style="margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--muted)">SELECTED: <span id="survey-selected" style="color:var(--accent)">Click map</span></span>
+    </div>
+    <div class="survey-progress" id="survey-progress" style="display:none">
+      <div class="survey-count"><span>Capture</span><span class="val" id="survey-cap-count">0 / 50</span></div>
+      <div class="bar-track"><div class="bar-fill" id="survey-bar" style="width:0%;background:var(--accent)"></div></div>
+    </div>
+    <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:8px">CAPTURED: <span id="survey-n-captured" style="color:var(--accent2)">0</span> / 9  (need ≥4)</div>
+    <div class="survey-captures" id="survey-captures"></div>
+    <div class="controls" style="margin-top:8px">
+      <button class="btn btn-survey" id="btn-capture" onclick="surveyCapture()" disabled>📍 Capture</button>
+      <button class="btn btn-survey" id="btn-compute" onclick="surveyCompute()" disabled>🧮 Compute</button>
+      <button class="btn" onclick="surveyClear()">🗑 Clear</button>
+    </div>
+    <div class="survey-result-box" id="survey-result-box" style="display:none">
+      <div class="lbl">Computed Anchor Positions</div>
+      <div id="survey-result-anchors"></div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:4px">RMS: <span id="survey-rms" style="color:var(--accent2)"></span></div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Controls</div>
+    <div class="controls">
+      <button class="btn active" id="btn-trail" onclick="toggleTrail()">Trail ON</button>
+      <button class="btn" onclick="clearTrail()">Clear</button>
+      <button class="btn" onclick="autoFit()">Reset view</button>
+      <button class="btn" onclick="exportCSV()">CSV</button>
+    </div>
+    <div class="ws-row">
+      <input class="ws-input" id="ws-url" value="ws://localhost:8765">
+      <button class="btn" onclick="reconnect()">Connect</button>
+    </div>
+  </div>
+  <div id="log"></div>
+</aside>
+
+<script>
+// Config — will be overwritten by server config message
+let ANCHORS = [
+  {id:1,x:-1.20,y:1.95},{id:2,x:1.20,y:1.95},{id:3,x:0.00,y:0.00}
+];
+const TRAIL_MAX=300, MAX_DIST=5.0, MAX_RMSE=0.5;
+
+let showTrail=true,lastData=null,lastTime=0,totalFixes=0,ws=null,pktCount=0,pktRate=0,history=[];
+// Per-tag rendering state — populated on first packet from each tag
+let tagTrails=new Map();    // tag_id → [{x,y}, ...]  (trail points)
+let tagPositions=new Map(); // tag_id → latest result dict
+let tagColors=new Map();    // tag_id → CSS color string
+// Default palette; overridden by server 'config' message tag_palette field
+let tagPalette=['#00d4ff','#e63946','#a3e635','#a78bfa','#ff9d00','#ff3d5a'];
+let stats={minX:Infinity,maxX:-Infinity,minY:Infinity,maxY:-Infinity};
+let view={scale:80,ox:0,oy:0};
+let dragging=false,dragStart=null,viewAtDrag=null;
+// Survey state (must be before drawBase which references them)
+let surveySelectedIdx=-1;
+let surveyCapturedSet=new Set();
+let surveyCapturing=false;
+
+const wrap=document.getElementById('map-wrap');
+const canvas=document.getElementById('canvas');
+const ctx=canvas.getContext('2d');
+
+function resize(){canvas.width=wrap.clientWidth;canvas.height=wrap.clientHeight;autoFit();draw()}
+function autoFit(){
+  const p=80,xs=ANCHORS.map(a=>a.x),ys=ANCHORS.map(a=>a.y);
+  const mnx=Math.min(...xs),mxx=Math.max(...xs),mny=Math.min(...ys),mxy=Math.max(...ys);
+  const rx=(mxx-mnx)||2,ry=(mxy-mny)||2,m=1.5;
+  const sx=(canvas.width-p*2)/(rx*m),sy=(canvas.height-p*2)/(ry*m);
+  view.scale=Math.min(sx,sy);
+  view.ox=canvas.width/2-((mnx+mxx)/2)*view.scale;
+  view.oy=canvas.height/2+((mny+mxy)/2)*view.scale;
+}
+new ResizeObserver(resize).observe(wrap);
+
+function wx(x){return x*view.scale+view.ox}
+function wy(y){return y*-view.scale+view.oy}
+function sw(x){return(x-view.ox)/view.scale}
+function sh(y){return(y-view.oy)/-view.scale}
+
+function buildAnchorPanel(){
+  const p=document.getElementById('anchor-panel');
+  p.innerHTML='<div class="panel-title">Anchor distances</div>';
+  ANCHORS.forEach(a=>{
+    p.innerHTML+=`<div class="anchor-row"><div class="anchor-id">A${a.id}</div><div class="anchor-dist-bar"><div class="anchor-dist-fill" id="d${a.id}-bar" style="width:0%"></div></div><div class="anchor-dist-val" id="d${a.id}-val">— m</div></div>`;
+  });
+}
+buildAnchorPanel();
+
+function draw(){
+  const W=canvas.width,H=canvas.height;
+  ctx.clearRect(0,0,W,H);
+
+  // Anchor triangle
+  if(ANCHORS.length>=3){
+    ctx.beginPath();
+    ctx.moveTo(wx(ANCHORS[0].x),wy(ANCHORS[0].y));
+    for(let i=1;i<ANCHORS.length;i++) ctx.lineTo(wx(ANCHORS[i].x),wy(ANCHORS[i].y));
+    ctx.closePath();
+    ctx.strokeStyle='rgba(255,157,0,0.18)';ctx.lineWidth=1;ctx.setLineDash([3,5]);ctx.stroke();ctx.setLineDash([]);
+  }
+
+  // Range circles
+  if(lastData){
+    ANCHORS.forEach(a=>{
+      const d=lastData['d'+a.id];
+      if(d!=null){
+        ctx.beginPath();ctx.arc(wx(a.x),wy(a.y),d*view.scale,0,Math.PI*2);
+        ctx.strokeStyle='rgba(255,157,0,0.12)';ctx.lineWidth=1;ctx.setLineDash([4,6]);ctx.stroke();ctx.setLineDash([]);
+      }
+    });
+  }
+
+  // Per-tag trails
+  if(showTrail){
+    tagTrails.forEach((trail,tid)=>{
+      if(trail.length<2)return;
+      const col=tagColors.get(tid)||'#00d4ff';
+      ctx.beginPath();ctx.moveTo(wx(trail[0].x),wy(trail[0].y));
+      for(let i=1;i<trail.length;i++) ctx.lineTo(wx(trail[i].x),wy(trail[i].y));
+      ctx.strokeStyle=col+'44';ctx.lineWidth=1.5;ctx.stroke();
+      const step=Math.max(1,Math.floor(trail.length/40));
+      for(let i=0;i<trail.length;i+=step){
+        const a=(i/trail.length)*0.5;
+        const ah=Math.floor(a*255).toString(16).padStart(2,'0');
+        ctx.beginPath();ctx.arc(wx(trail[i].x),wy(trail[i].y),2,0,Math.PI*2);
+        ctx.fillStyle=col+ah;ctx.fill();
+      }
+    });
+  }
+
+  // Anchors
+  ANCHORS.forEach(a=>{
+    const ax=wx(a.x),ay=wy(a.y);
+    ctx.beginPath();ctx.arc(ax,ay,14,0,Math.PI*2);ctx.strokeStyle='rgba(255,157,0,0.3)';ctx.lineWidth=1;ctx.stroke();
+    ctx.beginPath();ctx.arc(ax,ay,6,0,Math.PI*2);ctx.fillStyle='#ff9d00';ctx.fill();
+    ctx.fillStyle='#ff9d00';ctx.font='11px "Share Tech Mono"';ctx.textAlign='center';ctx.fillText('A'+a.id,ax,ay-20);
+    ctx.font='10px "Share Tech Mono"';ctx.fillStyle='rgba(255,157,0,0.5)';ctx.fillText(`(${a.x.toFixed(2)}, ${a.y.toFixed(2)})`,ax,ay+26);
+  });
+
+  // Per-tag markers
+  tagPositions.forEach((d,tid)=>{
+    const tx=wx(d.ex),ty=wy(d.ey);
+    const col=tagColors.get(tid)||'#00d4ff';
+    // Crosshair and pulse ring only for the most-recently-updated tag
+    if(d===lastData){
+      ctx.strokeStyle=col+'55';ctx.lineWidth=1;ctx.setLineDash([4,4]);
+      ctx.beginPath();ctx.moveTo(tx,0);ctx.lineTo(tx,H);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(0,ty);ctx.lineTo(W,ty);ctx.stroke();ctx.setLineDash([]);
+      const age=Date.now()-lastTime;
+      if(age<600){const r=12+(age/600)*22,a2=1-age/600;ctx.beginPath();ctx.arc(tx,ty,r,0,Math.PI*2);ctx.strokeStyle=col+Math.floor(a2*255).toString(16).padStart(2,'0');ctx.lineWidth=1.5;ctx.stroke();}
+    }
+    ctx.beginPath();ctx.arc(tx,ty,8,0,Math.PI*2);ctx.fillStyle=col;ctx.shadowColor=col;ctx.shadowBlur=14;ctx.fill();ctx.shadowBlur=0;
+    ctx.font='11px "Share Tech Mono"';ctx.fillStyle=col;ctx.textAlign='left';
+    const tlbl='0x'+tid.toString(16).toUpperCase().padStart(2,'0');
+    ctx.fillText(`${tlbl} (${d.ex.toFixed(3)}, ${d.ey.toFixed(3)})`,tx+14,ty-14);
+    if(d.zupt){ctx.font='bold 10px "Share Tech Mono"';ctx.textAlign='center';ctx.fillStyle='rgba(0,255,157,0.85)';ctx.fillText('STATIONARY',tx,ty+26);}
+  });
+
+  // Axes
+  ctx.font='10px "Share Tech Mono"';ctx.fillStyle='rgba(74,96,112,0.7)';
+  ctx.textAlign='left';ctx.fillText('X →',W-32,wy(0)+14);
+  ctx.textAlign='center';ctx.fillText('Y ↑',wx(0)-14,18);
+
+  // ── Survey grid points ────────────────────────────────────────────────
+  const GRID=[[-1.5,1.5],[0,1.5],[1.5,1.5],[-1.5,0],[0,0],[1.5,0],[-1.5,-1.5],[0,-1.5],[1.5,-1.5]];
+  GRID.forEach((pt,i)=>{
+    const cx=wx(pt[0]),cy=wy(pt[1]);
+    const isSel=surveySelectedIdx===i;
+    const isCap=surveyCapturedSet.has(i);
+    // Outer ring
+    ctx.beginPath();ctx.arc(cx,cy,isSel?14:10,0,Math.PI*2);
+    if(isCap){ctx.fillStyle='rgba(0,255,157,0.10)';ctx.strokeStyle='#00ff9d';ctx.lineWidth=2;}
+    else if(isSel){ctx.fillStyle='rgba(0,212,255,0.10)';ctx.strokeStyle='#00d4ff';ctx.lineWidth=2;}
+    else{ctx.fillStyle='rgba(200,218,232,0.04)';ctx.strokeStyle='rgba(200,218,232,0.25)';ctx.lineWidth=1;}
+    ctx.fill();ctx.stroke();
+    // Inner dot
+    ctx.beginPath();ctx.arc(cx,cy,3,0,Math.PI*2);
+    ctx.fillStyle=isCap?'#00ff9d':isSel?'#00d4ff':'rgba(200,218,232,0.4)';
+    ctx.fill();
+    // Checkmark for captured
+    if(isCap){ctx.font='10px "Share Tech Mono"';ctx.textAlign='center';ctx.fillStyle='#00ff9d';ctx.fillText('✓',cx,cy+22);}
+    // Label
+    ctx.font='9px "Share Tech Mono"';ctx.textAlign='center';
+    ctx.fillStyle=isSel?'#00d4ff':'rgba(200,218,232,0.35)';
+    ctx.fillText(`(${pt[0]},${pt[1]})`,cx,cy-(isSel?18:14));
+  });
+}
+
+(function loop(){draw();requestAnimationFrame(loop)})();
+
+function updateSidebar(d){
+  // Tag label in panel title
+  const tagLbl=document.getElementById('pos-tag-lbl');
+  if(tagLbl&&d.tag_id!=null){
+    const col=tagColors.get(d.tag_id)||'#00d4ff';
+    tagLbl.textContent='0x'+d.tag_id.toString(16).toUpperCase().padStart(2,'0');
+    tagLbl.style.color=col;
+  }
+  document.getElementById('px').textContent=d.ex.toFixed(3);
+  document.getElementById('py').textContent=d.ey.toFixed(3);
+  const rmse=d.rmse;
+  document.getElementById('rmse-val').textContent=rmse.toFixed(4)+' m';
+  const rb=document.getElementById('rmse-bar');
+  rb.style.width=Math.min(100,(rmse/MAX_RMSE)*100)+'%';
+  rb.style.background=rmse<0.1?'#00ff9d':rmse<0.25?'#ff9d00':'#ff3d5a';
+  ANCHORS.forEach(a=>{
+    const v=d['d'+a.id];
+    const be=document.getElementById('d'+a.id+'-bar');
+    const ve=document.getElementById('d'+a.id+'-val');
+    if(v!=null&&be&&ve){ve.textContent=v.toFixed(3)+' m';be.style.width=Math.min(100,(v/MAX_DIST)*100)+'%'}
+  });
+  if(d.ex<stats.minX)stats.minX=d.ex;if(d.ex>stats.maxX)stats.maxX=d.ex;
+  if(d.ey<stats.minY)stats.minY=d.ey;if(d.ey>stats.maxY)stats.maxY=d.ey;
+  document.getElementById('s-minx').textContent=stats.minX.toFixed(3);
+  document.getElementById('s-maxx').textContent=stats.maxX.toFixed(3);
+  document.getElementById('s-miny').textContent=stats.minY===Infinity?'—':stats.minY.toFixed(3);
+  document.getElementById('s-maxy').textContent=stats.maxY.toFixed(3);
+  totalFixes++;document.getElementById('h-total').textContent=totalFixes;document.getElementById('h-age').textContent='0';
+}
+
+setInterval(()=>{if(lastTime){const a=Date.now()-lastTime;document.getElementById('h-age').textContent=a;const dot=document.getElementById('dot');if(a>5000){dot.className='status-dot error';document.getElementById('status-text').textContent='SIGNAL LOST'}else if(a>2000){dot.className='status-dot stale';document.getElementById('status-text').textContent='STALE'}}},200);
+setInterval(()=>{pktRate=pktCount;pktCount=0;document.getElementById('h-fps').textContent=pktRate},1000);
+
+// Tuning sliders
+function setupTune(id,tvId,field,fmt,scale){
+  const sl=document.getElementById(id),tv=document.getElementById(tvId);
+  sl.addEventListener('input',()=>{
+    const v=parseFloat(sl.value);tv.textContent=fmt(v);
+    const msg={type:'tune'};msg[field]=scale?v/scale:v;
+    if(ws&&ws.readyState===1)ws.send(JSON.stringify(msg));
+  });
+}
+setupTune('t-filtN','tv-filtN','rangeFiltN',v=>v.toFixed(0));
+setupTune('t-ekfQ','tv-ekfQ','ekfQAccel',v=>v.toFixed(3));
+setupTune('t-ema','tv-ema','emaAlpha',v=>v.toFixed(2));
+setupTune('t-gateK','tv-gateK','gateK',v=>v.toFixed(1));
+setupTune('t-bias','tv-bias','rangeBiasM',v=>v.toFixed(0),1000);
+setupTune('t-sigma','tv-sigma','sigmaAccel',v=>v.toFixed(2));
+setupTune('t-zupt','tv-zupt','zuptAccelMean',v=>v.toFixed(2));
+
+// WebSocket
+function connect(url){
+  if(ws)ws.close();logMsg('Connecting to '+url+'…');
+  ws=new WebSocket(url);
+  ws.onopen=()=>{document.getElementById('dot').className='status-dot live';document.getElementById('status-text').textContent='LIVE';logMsg('Connected')};
+  ws.onmessage=e=>{try{
+    const d=JSON.parse(e.data);
+    if(d.type==='config'){
+      ANCHORS=d.anchors.map(a=>({id:a.id,x:a.x,y:a.y}));
+      if(d.tag_palette&&d.tag_palette.length) tagPalette=d.tag_palette;
+      buildAnchorPanel();autoFit();logMsg('Anchor config: '+ANCHORS.length+' anchors');
+      handleCalibStatus(d.calibration);return;
+    }
+    if(d.type==='survey_capture_started'){handleSurveyCaptureStarted(d);return;}
+    if(d.type==='survey_capture_progress'){handleSurveyCaptureProgress(d);return;}
+    if(d.type==='survey_capture_done'){handleSurveyCaptureDone(d);return;}
+    if(d.type==='survey_result'){handleSurveyResult(d);return;}
+    if(d.type==='survey_computing'){handleSurveyComputing();return;}
+    if(d.type==='survey_error'){handleSurveyError(d);return;}
+    if(d.type==='survey_cleared'){surveyClear();return;}
+    if(d.type==='CALIB_T1_STARTED'){handleCalibStarted(d);return;}
+    if(d.type==='CALIB_T1_PROGRESS'){handleCalibProgress(d);return;}
+    if(d.type==='CALIB_T1_DONE'){handleCalibDone(d);return;}
+    if(d.type==='CALIB_T1_SAVED'){handleCalibSaved(d);return;}
+    if(d.type==='CALIB_T1_STOPPED'){handleCalibStopped();return;}
+    if(d.type==='CALIB_T1_STATUS'){handleCalibStatus(d);return;}
+    if(d.type==='CALIB_T1_ERROR'){logMsg('Cal error: '+d.msg);return;}
+    lastData=d;lastTime=Date.now();pktCount++;
+    // Assign a color to this tag on first encounter
+    const tid=d.tag_id??0;
+    if(!tagColors.has(tid)) tagColors.set(tid, tagPalette[tagColors.size % tagPalette.length]);
+    if(showTrail){
+      if(!tagTrails.has(tid)) tagTrails.set(tid,[]);
+      const tr=tagTrails.get(tid);
+      tr.push({x:d.ex,y:d.ey});
+      if(tr.length>TRAIL_MAX) tr.shift();
+    }
+    tagPositions.set(tid,d);
+    history.push({t:new Date().toISOString(),...d});
+    rebuildTagLegend();
+    updateSidebar(d);
+    updateImu(d);
+    updateVelocity(d);
+    updateHealth(d);
+  }catch(ex){}};
+  ws.onclose=()=>{document.getElementById('dot').className='status-dot error';document.getElementById('status-text').textContent='DISCONNECTED';logMsg('Disconnected — retry 3s');setTimeout(()=>connect(document.getElementById('ws-url').value),3000)};
+  ws.onerror=()=>logMsg('WebSocket error');
+}
+function reconnect(){connect(document.getElementById('ws-url').value)}
+
+function toggleTrail(){showTrail=!showTrail;const b=document.getElementById('btn-trail');b.textContent=showTrail?'Trail ON':'Trail OFF';b.className=showTrail?'btn active':'btn'}
+function clearTrail(){tagTrails.forEach(tr=>{tr.length=0;});}
+function rebuildTagLegend(){
+  let el=document.getElementById('tag-legend');
+  if(!el){
+    el=document.createElement('div');el.id='tag-legend';
+    el.style.cssText='position:absolute;top:14px;right:14px;background:rgba(8,12,16,0.82);border:1px solid #1e2d3d;border-radius:4px;padding:7px 10px;font-family:"Share Tech Mono",monospace;font-size:10px;line-height:1.9;pointer-events:none;z-index:10;';
+    document.getElementById('map-wrap').appendChild(el);
+  }
+  if(!tagColors.size){el.style.display='none';return;}
+  el.style.display='block';
+  let html='';
+  tagColors.forEach((col,tid)=>{
+    const h='0x'+tid.toString(16).toUpperCase().padStart(2,'0');
+    html+=`<div style="display:flex;align-items:center;gap:7px"><span style="width:9px;height:9px;border-radius:50%;background:${col};box-shadow:0 0 6px ${col};flex-shrink:0;display:inline-block"></span><span style="color:${col}">TAG ${h}</span></div>`;
+  });
+  el.innerHTML=html;
+}
+function updateImu(d){
+  const imu=d.imu;
+  const panel=document.getElementById('imu-panel');
+  const conf=d.imu_orient_conf!=null?d.imu_orient_conf:(imu?3:0);
+  if(!imu){panel.style.opacity='0.4';return;}
+  panel.style.opacity=conf>0?'1':'0.55';
+  document.getElementById('imu-roll').textContent=imu.roll.toFixed(1);
+  document.getElementById('imu-pitch').textContent=imu.pitch.toFixed(1);
+  document.getElementById('imu-yaw').textContent=imu.yaw.toFixed(1);
+  document.getElementById('imu-ax').textContent=imu.ax.toFixed(2);
+  document.getElementById('imu-ay').textContent=imu.ay.toFixed(2);
+  document.getElementById('imu-az').textContent=imu.az.toFixed(2);
+  // Gyro row
+  const gyro=d.imu_gyro;
+  const gyroRow=document.getElementById('imu-gyro-row');
+  if(gyro&&gyro.length===3){
+    gyroRow.classList.add('visible');
+    document.getElementById('imu-gx').textContent=gyro[0].toFixed(3);
+    document.getElementById('imu-gy').textContent=gyro[1].toFixed(3);
+    document.getElementById('imu-gz').textContent=gyro[2].toFixed(3);
+  } else {gyroRow.classList.remove('visible');}
+  // Orientation confidence
+  const confEl=document.getElementById('imu-conf');
+  const confLabel=['unreliable','low','medium','high'][conf]||'';
+  confEl.textContent=conf<4?`CONF: ${conf}/3 (${confLabel})`:'';
+  confEl.style.color=conf>=2?'var(--accent2)':conf>=1?'var(--warn)':'var(--danger)';
+  // ZUPT badge
+  const badge=document.getElementById('zupt-badge');
+  badge.className='zupt-badge'+(d.zupt?' active':'');
+}
+
+function updateHealth(d){
+  if(!d.health)return;
+  const h=d.health;
+  // IMU pill
+  const imuPill=document.getElementById('hp-imu');
+  if(h.imu_available){
+    const c=h.orientation_confidence;
+    imuPill.className='health-pill '+(c>=2?'hp-ok':c>=1?'hp-warn':'hp-off');
+    imuPill.textContent='IMU: conf='+c;
+  } else {imuPill.className='health-pill hp-off';imuPill.textContent='IMU: none';}
+  // EKF pill
+  const ekfPill=document.getElementById('hp-ekf');
+  if(h.ekf_initialized){
+    ekfPill.className='health-pill '+(h.correction_accepted?'hp-ok':'hp-warn');
+    ekfPill.textContent='EKF: '+h.prediction_mode;
+  } else {ekfPill.className='health-pill hp-off';ekfPill.textContent='EKF: init';}
+  // ZUPT pill
+  const zuptPill=document.getElementById('hp-zupt');
+  zuptPill.className='health-pill '+(h.zupt_active?'hp-ok':'hp-off');
+  zuptPill.textContent=h.zupt_active?'ZUPT: on':'ZUPT: off';
+  // UWB pill
+  const uwbPill=document.getElementById('hp-uwb');
+  const n=h.n_anchors_used||0;
+  uwbPill.className='health-pill '+(n>=3?'hp-ok':n>=2?'hp-warn':'hp-off');
+  uwbPill.textContent='UWB: '+n+'A';
+}
+
+function updateVelocity(d){
+  if(d.vx==null)return;
+  document.getElementById('vel-vx').textContent=(d.vx>=0?'+':'')+d.vx.toFixed(3);
+  document.getElementById('vel-vy').textContent=(d.vy>=0?'+':'')+d.vy.toFixed(3);
+  document.getElementById('vel-speed').textContent=(d.speed||0).toFixed(3);
+  document.getElementById('vel-hdg').textContent=d.heading!=null?((d.heading>=0?'+':'')+d.heading.toFixed(1)):'—';
+  if(d.bx!=null){
+    document.getElementById('vel-bx').textContent=(d.bx*1000).toFixed(2)+' mm/s²';
+    document.getElementById('vel-by').textContent=(d.by*1000).toFixed(2)+' mm/s²';
+  }
+  // NIS indicator
+  const nisEl=document.getElementById('nis-val');
+  const nisSt=document.getElementById('nis-state');
+  if(d.nis!=null){
+    nisEl.textContent=d.nis.toFixed(2);
+    const ok=d.meas_accepted;
+    nisSt.textContent=ok?'✓ ACC':'✗ REJ';
+    nisSt.style.borderColor=ok?'var(--accent2)':'var(--danger)';
+    nisSt.style.color=ok?'var(--accent2)':'var(--danger)';
+    nisSt.style.background=ok?'rgba(0,255,157,0.07)':'rgba(255,61,90,0.07)';
+  }
+  // Prediction mode pill
+  const pm=document.getElementById('pred-mode');
+  if(d.pred_mode){
+    pm.textContent=d.pred_mode;
+    const isImu=d.pred_mode==='IMU';
+    pm.style.borderColor=isImu?'var(--accent2)':'var(--muted)';
+    pm.style.color=isImu?'var(--accent2)':'var(--muted)';
+    pm.style.background=isImu?'rgba(0,255,157,0.08)':'rgba(74,96,112,0.1)';
+  }
+}
+
+function exportCSV(){
+  if(!history.length)return;
+  const imuKeys=['roll','pitch','yaw','ax','ay','az'];
+  const newKeys=['vx','vy','speed','heading','bx','by','zupt','nis','meas_accepted','pred_mode'];
+  const hdrCols=['t','tag_id','x','y','ex','ey','rmse',...ANCHORS.map(a=>'d'+a.id),...imuKeys.map(k=>'imu_'+k),...newKeys];
+  const hdr=hdrCols.join(',')+'\n';
+  const rows=history.map(r=>{
+    const imuCols=imuKeys.map(k=>r.imu?r.imu[k]??'':'');
+    const base=['t','tag_id','x','y','ex','ey','rmse',...ANCHORS.map(a=>'d'+a.id)].map(k=>r[k]??'');
+    const ext=newKeys.map(k=>r[k]!=null?r[k]:'');
+    return [...base,...imuCols,...ext].join(',');
+  }).join('\n');
+  const b=new Blob([hdr+rows],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`uwb_${Date.now()}.csv`;a.click();logMsg('Exported '+history.length+' rows');
+}
+
+canvas.addEventListener('wheel',e=>{e.preventDefault();const f=e.deltaY<0?1.1:0.9;const mx=e.offsetX,my=e.offsetY;const wx0=sw(mx),wy0=sh(my);view.scale*=f;view.ox=mx-wx0*view.scale;view.oy=my-wy0*-view.scale},{passive:false});
+canvas.addEventListener('mousedown',e=>{dragging=true;dragStart={x:e.clientX,y:e.clientY};viewAtDrag={ox:view.ox,oy:view.oy};canvas.style.cursor='grabbing'});
+window.addEventListener('mousemove',e=>{if(!dragging)return;view.ox=viewAtDrag.ox+(e.clientX-dragStart.x);view.oy=viewAtDrag.oy+(e.clientY-dragStart.y)});
+window.addEventListener('mouseup',()=>{dragging=false;canvas.style.cursor='default'});
+
+function logMsg(msg){const el=document.getElementById('log');const ts=new Date().toTimeString().slice(0,8);el.innerHTML=`<div class="entry"><span class="ts">${ts}</span>${msg}</div>`+el.innerHTML;if(el.children.length>30)el.removeChild(el.lastChild)}
+
+// ── Survey grid click detection ──────────────────────────────────────────
+const GRID=[[-1.5,1.5],[0,1.5],[1.5,1.5],[-1.5,0],[0,0],[1.5,0],[-1.5,-1.5],[0,-1.5],[1.5,-1.5]];
+canvas.addEventListener('click',e=>{
+  const rect=canvas.getBoundingClientRect();
+  const mx=e.clientX-rect.left,my=e.clientY-rect.top;
+  let best=-1,bestD=25;
+  GRID.forEach((pt,i)=>{
+    const d=Math.hypot(wx(pt[0])-mx,wy(pt[1])-my);
+    if(d<bestD){bestD=d;best=i;}
+  });
+  if(best>=0){
+    surveySelectedIdx=best;
+    const pt=GRID[best];
+    document.getElementById('survey-selected').textContent=`(${pt[0]}, ${pt[1]})`;
+    document.getElementById('btn-capture').disabled=false;
+  }
+});
+
+// ── Multi-Point Survey UI ────────────────────────────────────────────────
+
+function surveyCapture(){
+  if(!ws||ws.readyState!==1){logMsg('Cannot capture: not connected');return;}
+  if(surveySelectedIdx<0){logMsg('Select a grid point first');return;}
+  if(surveyCapturing){logMsg('Capture in progress');return;}
+  ws.send(JSON.stringify({type:'survey_capture',point_idx:surveySelectedIdx,n_samples:50}));
+  logMsg('Capture started at '+GRID[surveySelectedIdx]);
+}
+
+function surveyCompute(){
+  if(!ws||ws.readyState!==1){logMsg('Cannot compute: not connected');return;}
+  ws.send(JSON.stringify({type:'survey_compute'}));
+  document.getElementById('survey-dot').className='survey-dot active';
+  document.getElementById('survey-status-text').textContent='COMPUTING…';
+  document.getElementById('btn-compute').disabled=true;
+  logMsg('Computing anchor positions…');
+}
+
+function surveyClear(){
+  if(!ws||ws.readyState!==1){logMsg('Cannot clear: not connected');return;}
+  ws.send(JSON.stringify({type:'survey_clear'}));
+  surveyCapturedSet.clear();
+  surveySelectedIdx=-1;
+  surveyCapturing=false;
+  document.getElementById('survey-captures').innerHTML='';
+  document.getElementById('survey-n-captured').textContent='0';
+  document.getElementById('survey-dot').className='survey-dot';
+  document.getElementById('survey-status-text').textContent='IDLE';
+  document.getElementById('survey-selected').textContent='Click map';
+  document.getElementById('btn-capture').disabled=true;
+  document.getElementById('btn-compute').disabled=true;
+  document.getElementById('survey-result-box').style.display='none';
+  document.getElementById('survey-progress').style.display='none';
+  logMsg('Survey cleared');
+}
+
+// Handle survey WebSocket messages
+function handleSurveyCaptureStarted(d){
+  surveyCapturing=true;
+  document.getElementById('survey-dot').className='survey-dot active';
+  document.getElementById('survey-status-text').textContent='CAPTURING…';
+  document.getElementById('survey-progress').style.display='block';
+  document.getElementById('survey-bar').style.width='0%';
+  document.getElementById('survey-cap-count').textContent='0 / '+d.n_samples;
+  document.getElementById('btn-capture').disabled=true;
+}
+
+function handleSurveyCaptureProgress(d){
+  const pct=d.target>0?Math.round(d.n/d.target*100):0;
+  document.getElementById('survey-bar').style.width=pct+'%';
+  document.getElementById('survey-cap-count').textContent=d.n+' / '+d.target;
+}
+
+function handleSurveyCaptureDone(d){
+  surveyCapturing=false;
+  surveyCapturedSet.add(d.point_idx);
+  document.getElementById('survey-dot').className='survey-dot';
+  document.getElementById('survey-status-text').textContent='IDLE';
+  document.getElementById('survey-progress').style.display='none';
+  document.getElementById('btn-capture').disabled=false;
+  const n=d.n_total_captures;
+  document.getElementById('survey-n-captured').textContent=n;
+  document.getElementById('btn-compute').disabled=n<4;
+  // Add row to captures list
+  const pt=GRID[d.point_idx]||[0,0];
+  const dists=Object.entries(d.avg_dists||{}).map(([k,v])=>'A'+k+'='+v.toFixed(3)+'m').join(' ');
+  const el=document.getElementById('survey-captures');
+  el.innerHTML+=`<div class="survey-cap-row"><span class="cap-idx">#${n}</span><span class="cap-coord">(${pt[0]},${pt[1]})</span><span class="cap-dists">${dists}</span></div>`;
+  el.scrollTop=el.scrollHeight;
+  logMsg('Captured ('+pt[0]+','+pt[1]+'): '+dists);
+}
+
+function handleSurveyResult(d){
+  document.getElementById('survey-dot').className='survey-dot done';
+  document.getElementById('survey-status-text').textContent='COMPLETE';
+  document.getElementById('btn-compute').disabled=false;
+  document.getElementById('survey-result-box').style.display='block';
+  const el=document.getElementById('survey-result-anchors');
+  el.innerHTML='';
+  (d.anchors||[]).forEach(a=>{
+    el.innerHTML+=`<div class="survey-result-anchor"><span class="aid">A${a.id}</span>  <span class="coords">(${a.x.toFixed(3)}, ${a.y.toFixed(3)})</span></div>`;
+  });
+  document.getElementById('survey-rms').textContent=(d.residual_rms*100).toFixed(1)+' cm';
+  logMsg('Survey complete — RMS='+(d.residual_rms*100).toFixed(1)+'cm');
+}
+
+function handleSurveyError(d){
+  document.getElementById('survey-dot').className='survey-dot error';
+  document.getElementById('survey-status-text').textContent='ERROR';
+  document.getElementById('btn-compute').disabled=false;
+  document.getElementById('btn-capture').disabled=false;
+  surveyCapturing=false;
+  logMsg('Survey error: '+d.msg);
+}
+
+function handleSurveyComputing(){
+  document.getElementById('survey-dot').className='survey-dot active';
+  document.getElementById('survey-status-text').textContent='COMPUTING…';
+}
+
+// ── Session Calibration (Tier 1) ────────────────────────────────────────────
+let calibState='IDLE';
+
+function calibStart(){
+  if(!ws||ws.readyState!==1){logMsg('Cannot calibrate: not connected');return;}
+  ws.send(JSON.stringify({type:'CALIB_T1_START',n_samples:500}));
+}
+function calibSave(){
+  if(!ws||ws.readyState!==1)return;
+  ws.send(JSON.stringify({type:'CALIB_T1_SAVE'}));
+}
+function calibDiscard(){
+  if(!ws||ws.readyState!==1)return;
+  ws.send(JSON.stringify({type:'CALIB_T1_STOP'}));
+}
+
+function handleCalibStarted(d){
+  calibState='COLLECTING';
+  document.getElementById('calib-dot').className='survey-dot active';
+  document.getElementById('calib-status-text').textContent='COLLECTING…';
+  document.getElementById('calib-progress').style.display='block';
+  document.getElementById('calib-bar').style.width='0%';
+  document.getElementById('calib-cap-count').textContent='0 / '+d.n_target;
+  document.getElementById('btn-calib-start').disabled=true;
+  document.getElementById('btn-calib-save').style.display='none';
+  document.getElementById('btn-calib-discard').style.display='inline-block';
+  if(d.cal_point_m)document.getElementById('calib-point').textContent=
+    '('+d.cal_point_m[0].toFixed(3)+', '+d.cal_point_m[1].toFixed(3)+') m';
+  logMsg('Calibration collecting — place tag at cal point');
+}
+
+function handleCalibProgress(d){
+  const pct=d.n_target>0?Math.round(d.n/d.n_target*100):0;
+  document.getElementById('calib-bar').style.width=pct+'%';
+  document.getElementById('calib-cap-count').textContent=d.n+' / '+d.n_target;
+  _updateCalibBiasDisplay(d.anchors);
+}
+
+function handleCalibDone(d){
+  calibState='REVIEW';
+  document.getElementById('calib-dot').className='survey-dot';
+  document.getElementById('calib-status-text').textContent='REVIEW';
+  document.getElementById('calib-progress').style.display='none';
+  document.getElementById('btn-calib-start').disabled=false;
+  document.getElementById('btn-calib-save').style.display='inline-block';
+  document.getElementById('btn-calib-discard').style.display='inline-block';
+  _updateCalibBiasDisplay(d.anchors);
+  logMsg('Calibration complete — review and save');
+}
+
+function handleCalibSaved(d){
+  calibState='SAVED';
+  document.getElementById('calib-dot').className='survey-dot done';
+  document.getElementById('calib-status-text').textContent='ACTIVE';
+  document.getElementById('btn-calib-save').style.display='none';
+  document.getElementById('btn-calib-discard').style.display='none';
+  document.getElementById('btn-calib-start').disabled=false;
+  const badge=document.getElementById('calib-loaded-badge');
+  badge.textContent='T1 ACTIVE';badge.style.color='var(--accent2)';
+  // Reset global bias slider to 0 (T1 per-anchor corrections replace it)
+  const sl=document.getElementById('t-bias'),tv=document.getElementById('tv-bias');
+  if(sl){sl.value=0;tv.textContent='0';}
+  logMsg('T1 calibration applied and saved');
+}
+
+function handleCalibStopped(){
+  // Clear collection-specific UI; CALIB_T1_STATUS follows immediately to restore correct dot/label
+  document.getElementById('calib-progress').style.display='none';
+  document.getElementById('btn-calib-start').disabled=false;
+  document.getElementById('btn-calib-save').style.display='none';
+  document.getElementById('btn-calib-discard').style.display='none';
+  document.getElementById('calib-biases').innerHTML='';
+  logMsg('Calibration discarded');
+}
+
+function handleCalibStatus(cal){
+  if(!cal)return;
+  if(cal.cal_point_m)document.getElementById('calib-point').textContent=
+    '('+cal.cal_point_m[0].toFixed(3)+', '+cal.cal_point_m[1].toFixed(3)+') m';
+  const badge=document.getElementById('calib-loaded-badge');
+  if(cal.t1_loaded){
+    calibState='SAVED';
+    document.getElementById('calib-dot').className='survey-dot done';
+    document.getElementById('calib-status-text').textContent='ACTIVE';
+    badge.textContent='T1 ACTIVE';badge.style.color='var(--accent2)';
+    _updateCalibBiasDisplay(cal.biases);
+    const sl=document.getElementById('t-bias'),tv=document.getElementById('tv-bias');
+    if(sl){sl.value=0;tv.textContent='0';}
+  } else {
+    calibState='IDLE';
+    document.getElementById('calib-dot').className='survey-dot';
+    document.getElementById('calib-status-text').textContent='IDLE';
+    badge.textContent='';
+  }
+}
+
+function _updateCalibBiasDisplay(anchors){
+  const container=document.getElementById('calib-biases');
+  if(!anchors||!Object.keys(anchors).length){container.innerHTML='';return;}
+  let html='';
+  for(const [aid,data] of Object.entries(anchors).sort()){
+    const n=data.n||data.n_samples||0;
+    const bias=data.bias_mm;
+    const std=data.std_mm||data.bias_std_mm||0;
+    const cls=std<10?'good':std<20?'warn':'bad';
+    const sign=bias>=0?'+':'';
+    html+=`<div class="calib-anchor-row"><div class="calib-anchor-id">A${aid}</div>`+
+          `<div class="calib-bias-val ${cls}">${sign}${bias.toFixed(1)}&nbsp;mm</div>`+
+          `<div class="calib-std-val">±${std.toFixed(1)}&nbsp;mm</div>`+
+          `<div class="calib-n-val">${n>0?'n='+n:''}</div></div>`;
+  }
+  container.innerHTML=html;
+}
+
+autoFit();connect(document.getElementById('ws-url').value);
+</script>
+</body>
+</html>

@@ -1,0 +1,2 @@
+wall_time_iso,anchor_id,session,distance_cm,true_distance_m,sample_n,t_ms,d_mm,rx_power_dbm,fp_power_dbm,quality,antenna_delay,transport,packets_received,packets_accepted,packets_discarded
+2026-06-19T12:37:00.417,2,1,5,0.05,1,391831,319,-68.0,,,16385,udp:4100,1,1,0

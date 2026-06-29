@@ -1,0 +1,89 @@
+========================================================================
+UWB RTLS — Phase 1 Bias Characterisation Report
+  Source : bias_anchor1_20260617_201942.csv
+  Date   : 2026-06-18 11:27:38
+========================================================================
+
+1. Session Summary
+──────────────────
+Session  Dist (m)   N_raw  N_clean  N_out  Mean (mm)  Bias (mm)  Std (mm)  σ_mean  q̄ (dBm)
+───────────────────────────────────────────────────────────────────────────────────────────
+      1       1.0    1500     1491      9     1205.8     +205.8      26.7    0.69    -91.6
+      2       1.0    1500     1489     11     1198.7     +198.7      30.7    0.80    -91.8
+      3       3.0    1500     1338    162     2933.3      -66.7      39.0    1.07    -97.4
+      4       3.0    1500     1500      0     2925.7      -74.3      39.8    1.03    -98.2
+
+2. Criterion 2 — Repeatability  (pass: session-to-session Δ < 5 mm)
+───────────────────────────────────────────────────────────────────
+  1.0 m  session biases = [+205.8  +198.7] mm
+          max Δ = 7.1 mm   → FAIL ✗
+  3.0 m  session biases = [-66.7  -74.3] mm
+          max Δ = 7.6 mm   → FAIL ✗
+
+  CRITERION 2 OVERALL: FAIL ✗
+
+3. Criterion 1 — Distance-Dependent Bias (statistically significant?)
+─────────────────────────────────────────────────────────────────────
+  1.0 m  pooled mean bias = +202.3 ± 9.9 mm  (95% CI)
+  3.0 m  pooled mean bias = -70.7 ± 9.9 mm  (95% CI)
+
+  Bias difference between distances = 273.0 mm
+  Combined uncertainty             = 14.0 mm
+  SNR (diff / unc)                 = 19.5×
+  Pass threshold: SNR ≥ 3×
+
+  CRITERION 1: PASS ✓
+
+4. Criterion 3 — Bias Swing vs Noise Floor  (pass: swing > 20 mm)
+─────────────────────────────────────────────────────────────────
+  Bias swing = 273.0 mm  (threshold: 20 mm)
+
+  CRITERION 3: PASS ✓
+
+5. Criteria 4 & 5 — Not Yet Evaluable
+─────────────────────────────────────
+  Criterion 4 (common across anchors): requires data from all 3 anchors.
+  Criterion 5 (>20% model improvement on held-out data): requires ≥5
+  test distances and all-anchor data.
+  → Pending full 8-distance experiment.
+
+6. Phase 1 Gate Decision
+────────────────────────
+  Criterion 1 (significant distance bias) : PASS ✓
+  Criterion 2 (repeatability)             : FAIL ✗
+  Criterion 3 (bias > noise floor)        : PASS ✓
+  Criterion 4 (common across anchors)     : PENDING — more data needed
+  Criterion 5 (model improvement > 20%)   : PENDING — more data needed
+   VERDICT — Criterion 2 FAILS. Session-to-session repeatability is
+  insufficient. The bias is not reproducible enough to build a stable
+  correction table. Investigate positioning jitter or multipath before
+  proceeding.
+
+7. Key Observations
+───────────────────
+  1.0 m: bias=+202.3 mm, σ=29.0 mm, q̄=-91.7 dBm  (n=2980)
+  3.0 m: bias=-70.7 mm, σ=39.6 mm, q̄=-97.8 dBm  (n=2838)
+
+  RX power decreases with distance (as expected for LOS):
+    1.0 m: -91.7 dBm   3.0 m: -97.8 dBm   Δ = -6.1 dBm
+
+  Bias sign interpretation:
+    1.0 m  → +202.3 mm  (reads LONGER (positive bias))
+    3.0 m  → -70.7 mm  (reads SHORTER (negative bias))
+
+8. Recommended Next Steps
+─────────────────────────
+  1. Run the full 8-distance experiment (0.5, 1.0, 1.5, 2.0, 3.0, 4.0,
+     5.0, 6.0 m) for all 3 anchors — 2 sessions per distance per anchor.
+     This enables evaluation of Criteria 4 and 5 and selection of the
+     best correction model (polynomial vs lookup-table vs spline).
+
+  2. Use serial transport (--serial /dev/ttyUSBx) to avoid AP isolation
+     issues on the "UWB" WiFi network.
+
+  3. Check whether the bias at 1.0 m (+208 mm nominal) is consistent with
+     the current ANTENNA_DELAY calibration — a large positive bias at all
+     distances suggests the antenna delay may be slightly off, independent
+     of the distance-dependent term.
+
+========================================================================

@@ -23,7 +23,9 @@ struct RangeResult {
   uint8_t id       = UWB_ADDR_INVALID;
   bool    valid    = false;   // did this anchor answer this sweep?
   float   distance = 0.0f;    // metres
-  float   rxPower  = 0.0f;    // dBm
+  float   rxPower  = 0.0f;    // dBm (total receive power)
+  float   fpPower  = 0.0f;    // dBm (first-path power; for NLOS scoring)
+  float   quality  = 0.0f;    // receive quality (FP amplitude / noise estimate)
 };
 
 class UwbScheduler {

@@ -1,5 +1,5 @@
-# UWB RTLS — Full Improvement Plan (Rev 2)
-*Last updated: 2026-06-10*
+# UWB RTLS — Full Improvement Plan (Rev 3)
+*Last updated: 2026-06-29*
 
 > **This file is the live, portable progress tracker** (committed to git, so it is
 > readable from any clone on any PC). Per-item status markers below are the source
@@ -10,280 +10,224 @@
 
 ## Context
 
-**Hardware:** 4× Makerfabs "ESP32 UWB Pro with Display" (DW1000 chip, PA/LNA amplifier, ESP32, SSD1306 OLED)  
-**Configuration:** 3 anchors + 1 tag (extendable)  
-**Goal:** Low-cost microcontroller-level indoor positioning system delivering XYZ + RPY without camera-based systems  
-**Current accuracy:** 3–10 cm (dominated by calibration noise, no NLOS detection, constant-velocity EKF, no IMU)
+**Hardware:** 4× anchors (Makerfabs "ESP32 UWB Pro with Display", DW1000, PA/LNA) + 1 tag (ESP32-Wrover + DW1000 module + BNO085 IMU)
+**Configuration:** 4 anchors + 1 tag with IMU
+**Goal:** Indoor positioning at ≤3 cm XY, ≤5 cm Z, ≤5° RPY
+**Current accuracy:** 3–10 cm XY (calibration noise, NLOS, limited height separation of anchors)
+
+**Host pipeline (as of 2026-06-29):** Python is the primary host. MATLAB is shelved — it lags significantly behind the Python pipeline (no IMU, no NLOS, parses v1 only, single-tag only, no ZUPT/NIS/adaptive-R/per-anchor calibration). See `python/` for the active host pipeline.
+
+**Board variants in the fleet:**
+- **Anchor boards:** Makerfabs "ESP32 UWB Pro with Display" (CS=21 default in `UwbConfig.h`)
+- **Tag board:** ESP32-Wrover + standalone DW1000 module + BNO085 IMU (CS=4, OLED on 32/33, BNO085 on Wire1 25/26 — see `sketches/TagWrover/`)
+
+---
+
+## Python Pipeline (`python/`)
+
+Entry points:
+- `python/run_localization.py` — main live localisation (UDP or serial, FusionEKF, ZUPT, live display, JSONL logging)
+- `python/run_survey.py` — trigger anchor self-survey, collect SURVEY lines, run MDS, write `anchors.json`
+- `python/collect_calibration_data.py` — collect range samples at a known position for Tier-1 bias calibration
+- `python/calibration_manager.py` — compute and store per-anchor bias corrections → `calibration.json`
+- `python/multipoint_survey.py` — 9-position grid calibration, jointly solves anchor + tag positions
+
+Library (`python/rtls/`):
+- `frame_parser.py` — v1/v2/v3 wire format parser (v3: fp_dbm, quality per anchor + gyro in IMU tail)
+- `fusion_ekf.py` — 6D EKF `[px, py, vx, vy, bx, by]` with IMU-driven prediction, ZUPT injection, NIS chi-squared gate, adaptive R covariance
+- `zupt_detector.py` — multi-threshold stationarity detection (accel variance + gyro Z + speed gate + debounce, sliding window 8 packets)
+- `multilaterator.py` — Levenberg-Marquardt multilateration, any N≥dim+1
+- `position_ekf.py` — simple CV-EKF (no IMU, fallback / reference)
+- `anchor_config.py` — loads `matlab/config/anchors.json`
+- `fusion_config.py` — FusionEKF tuning parameters
+- `system_health.py` — health monitoring / diagnostics
+- `imu_integrator.py` — IMU integration helpers
+- `analysis/` — post-hoc log analysis scripts and figures
+
+**NLOS scoring (FusionEKF):**
+`nlos_score = max(0, (rx_dbm − fp_dbm) / 6)` — DW1000 first-path vs total power diagnostic.
+`nlos_factor = 1 + mean(nlos_scores)` inflates the measurement noise covariance R per sweep.
+
+**ZUPT:** injects zero-velocity pseudo-measurement when `accel_var < 0.005`, `accel_mean < 0.10 m/s²`, `|gyro_z| < 0.087 rad/s`, `speed < 0.05 m/s` for ≥3 consecutive packets.
+
+**NIS gate:** chi-squared gate at 95th percentile — rejects measurements with `NIS > chi2.ppf(0.95, df=m)`.
 
 ---
 
 ## Existing Library Comparison
 
-| Capability | thotro | Makerfabs | jremington | pizzo00 | dw1000-ng | UwbRtls (ours) |
-|---|---|---|---|---|---|---|
-| Anchor ceiling | 4 (frame limit) | 4 | 7* | 6 | Unlimited | **Unlimited** |
-| RF collisions | Yes (broadcast POLL) | Yes | Yes | Yes | No | **No (addressed-only)** |
-| Update rate | ~0.6 Hz | ~0.6 Hz | ~0.6 Hz | ~1 Hz | ~2 Hz | **~3 Hz** |
-| Multi-tag | No | No | No | Partial | No | **Designed-in** |
-| NLOS detection | No | No | No | No | No | **Planned** |
-| IMU fusion | No | No | No | No | No | **Planned** |
-| 3D + RPY | No | No | Fragile | No | No | **Planned** |
-| Anchor self-survey | No | No | No | No | No | **Planned** |
-| Session robustness | N/A | N/A | N/A | N/A | N/A | **Done** |
-
-*jremington raises the MAX_DEVICES counter to 7 but the RANGE frame encoding still overflows at 5 anchors.
-
-### Why existing libraries are limited
-
-**thotro/arduino-dw1000 (canonical, abandoned 2019):**
-- 4-anchor ceiling: RANGE frame encoding uses 17 bytes/device × 4 = 68 bytes in a 90-byte buffer. Any 5th anchor overflows silently (corrupted ranges, then silence — Issue #81).
-- Broadcast POLL causes RF collisions: all anchors reply to POLL_ACK simultaneously with no slot assignment.
-- `_networkDevicesNumber` not declared `volatile` — compiler caches stale value, corrupting device list (Issue #179, never fixed in main repo).
-- ~0.6 Hz update rate (21-tick cycle × 80 ms default timer delay).
-- `_FPPower` and `_RXPower` fields computed and stored but never used for NLOS detection.
-
-**Makerfabs mf_DW1000:** Essentially thotro with ESP32 pin remapping. Law-of-cosines solver hardcoded for exactly 3 anchors.
-
-**jremington fork:** Adds volatile fix and bumps MAX_DEVICES to 7, but frame encoding unchanged — still overflows at 5 anchors. On-device LLS solver with precomputed normal matrix (good technique).
-
-**pizzo00 fork:** Encoding trick: differential timestamps (12 bytes/device vs 17) → 6 anchors per RANGE frame. Best existing solution but still uses broadcast POLL so collisions remain.
-
-**dw1000-ng (archived 2023):** Infrastructure-coordinated (no fixed anchor array), deep sleep support, still single-tag only.
-
-### What to borrow from existing libraries
-
-| Source | Technique | Integrated in |
-|---|---|---|
-| jremington | Age-gated anchor eviction | Phase 1.2 (done) |
-| jremington | Precomputed (AᵀA)⁻¹ for on-device solve | Phase 6.3 |
-| pizzo00 | Differential timestamp encoding (12 B vs 17 B/device) | Phase 6.2 |
-| dw1000-ng | Deep sleep on anchors between ranging cycles | Phase 5.1 |
-| Nobody | FP_POWER / RX_POWER NLOS detection | Phase 2.1 |
+| Capability | thotro | Makerfabs | jremington | pizzo00 | UwbRtls (ours) |
+|---|---|---|---|---|---|
+| Anchor ceiling | 4 (frame limit) | 4 | 7* | 6 | **Unlimited** |
+| RF collisions | Yes | Yes | Yes | Yes | **No (addressed-only)** |
+| Update rate | ~0.6 Hz | ~0.6 Hz | ~0.6 Hz | ~1 Hz | **~10 Hz** |
+| Multi-tag | No | No | No | Partial | **Designed-in** |
+| NLOS detection | No | No | No | No | **Done (v3 wire format)** |
+| IMU fusion | No | No | No | No | **Done (Python FusionEKF)** |
+| 3D + RPY | No | No | Fragile | No | **Partial (RPY done, 3D Z pending)** |
+| Anchor self-survey | No | No | No | No | **Done** |
 
 ---
 
 ## Implementation Status
 
-### Already Done ✓
-- MATLAB watchdog + UDP auto-reconnect (10 s timeout → recreates udpport)
-- EKF divergence guard + auto-reset (jump >2 m or trace(P) >25 triggers reinit)
-- Age-gated anchor eviction in MATLAB (AGE_GATE_SEC = 3.0 s)
-- RANGE_BIAS_M tuning slider (0–0.10 m global multipath bias subtraction)
-- Inner try-catch (bad sweeps skip silently, session survives)
-- Status label in tuning panel (packet count, EKF resets, current bias)
+### Done ✓ (all in working tree)
+
+**Phase 0 — Python + MATLAB robustness:**
+- Python FusionEKF with IMU-driven prediction, ZUPT, NIS chi-squared gate, adaptive R
+- MATLAB watchdog + UDP auto-reconnect, EKF divergence guard, age-gated eviction, bias slider, tuning panel (*MATLAB now shelved*)
+
+**Phase 1 — Foundation:**
+- 1.0: `UwbConfig.h` → 64 MHz PRF accuracy mode, reply delay 7000 → 6000 µs. *HW: reflash+recal pending.*
+- 1.1: `AntennaCalibration.ino` → 200 samples / 14 iters, uint16_t-safe. *HW: run+validate pending.*
+- 1.2: `UwbScheduler` per-anchor `_failStreak`/`_skipSweeps`/`_backoffMult`; 3 fails → skip 5 sweeps, doubling (5→10→20→40).
+- 1.3A: `UWB_REPLY_DELAY_US` 6000 → 5000 µs. *HW: reflash+confirm.*
+- 1.3B: 6.8 Mbps fast mode — **CONFIRMED FAILED** (2026-06-17, all 4 boards produced garbage frames, reverted). Root cause unknown. No longer pending.
+- 1.5: Anchor self-survey via `MSG_SURVEY_REQ/RESP`; `python/run_survey.py` collects, runs MDS, writes `anchors.json`.
+
+**Phase 2 — Ranging Quality (firmware side):**
+- 2.1 firmware: `TwrEngine` reads `getFirstPathPower()` + `getReceiveQuality()` after each rangeTo(). `UwbScheduler` carries `fpPower` + `quality` in `RangeResult`. `HostLink` outputs v3 wire format (`fp_dbm`, `quality` per anchor). *HW: reflash all boards to get fp_dbm in packets.*
+- 2.1 Python: FusionEKF uses fp_dbm for adaptive R (nlos_factor). `frame_parser.py` parses v3.
+- 2.2 Python: Weighted measurement noise via `nlos_factor × R_base`.
+
+**Phase 4 — IMU + Orientation:**
+- 4.1: 4 anchors in `ANCHORS[]` for both Tag.ino and TagWrover.ino. `anchors.json` has 4 anchors.
+- 4.2: `TagWrover.ino` — full BNO085 implementation via Adafruit BNO08x on Wire1 (GPIO 25/26, I2C 0x4A). Reports: `SH2_ROTATION_VECTOR` + `SH2_LINEAR_ACCELERATION` + `SH2_GYROSCOPE_CALIBRATED` at 100 Hz. IMU tail in v3 wire format. Reset detection + re-enable. WiFi RF glitch workaround (re-init Wire1 after WiFi connect).
+- 4.3: RPY from quaternion in `TagWrover.ino` (full `quatToRPY()`). OLED shows R/P/Y/accel. Serial prints every 200 ms.
+- 4.4: `python/rtls/fusion_ekf.py` — FusionEKF `[px, py, vx, vy, bx, by]`. Dual-mode prediction: IMU-driven (ax, ay world-frame) or CV fallback. ZUPT injection. NIS gate. Adaptive R.
+
+**Calibration (Python — new items):**
+- Tier-1 per-anchor bias: `calibration_manager.py` computes mean bias at circumcenter, saves `calibration.json` v2 (per-anchor `bias_mm`, `bias_std_mm`, `n_samples`). Current data: A1=+445mm, A2=+708mm, A3=+415mm, A4=+378mm. Large values are primarily height-offset error (anchors at ~2m, tag at floor, 2D model treats z=0 for all).
+- Multipoint survey: `python/multipoint_survey.py` — 9-position grid, jointly solves anchor + tag positions via `scipy.optimize.least_squares`.
+
+**System fixes (2026-06-29):**
+- **DW1000 receiver-wedge bug fix:** `TwrEngine::begin()` now registers `onReceiveFailed` and `onReceiveTimeout` no-op handlers. The DW1000 driver only executes its clearReceiveStatus() → newReceive() → startReceive() re-arm sequence when a handler is registered — without them, any CRC/LDE error leaves the receiver permanently wedged. **This was the root cause of 4-anchor disconnections.** *HW: reflash all boards.*
+- WiFi reconnect in `HostLink`: lazy 10-second back-off reconnect on `checkWifi()`, UDP drop counter.
+- Stray POLL_ACK warning in `TwrEngine::rangeTo()` (detects duplicate anchor IDs).
+- `SensorImu.h` ImuSample: added `status` (BNO085 accuracy 0–3) and `gx/gy/gz` (calibrated gyroscope) fields.
+- TagWrover + AnchorWrover sketches: `sketches/TagWrover/` and `sketches/AnchorWrover/`.
 
 ---
 
 ## Phase 1 — Foundation Fixes
 
-*No algorithm changes. Highest ROI for effort.*
-
 ### 1.0 Switch to 64 MHz PRF accuracy mode  — ✓ CODE DONE (2026-06-10)
-> **Status:** Code complete in `libraries/UwbRtls/src/UwbConfig.h` — `UWB_RADIO_MODE` → `MODE_LONGDATA_RANGE_ACCURACY`, `UWB_REPLY_DELAY_US` 7000 → 6000 µs (shared header, applies to all boards). **Pending on hardware:** reflash all 4 boards, then re-run calibration — antenna-delay values differ between PRF modes, so existing delays are now stale.
-
-**What:** Change `DW1000.enableMode(MODE_LONGDATA_RANGE_LOWPOWER)` → `MODE_LONGDATA_RANGE_ACCURACY` in `UwbConfig.h`.  
-**Why:** 64 MHz PRF produces a sharper correlation peak in the channel impulse response → better first-path detection → less multipath ambiguity. The Pro boards already have a PA/LNA for range; this improves accuracy not range.  
-**Note:** Must reflash all 4 boards. Re-calibrate after (step 1.1) — delay values will differ. Reduce reply delay from 7000 → 6000 µs.  
-**Removes:** ~1–3 cm systematic ranging error from multipath peak ambiguity.  
-**Complexity:** Easy
+> **HW pending:** reflash all boards, then recalibrate (1.1) — delay values differ between PRF modes.
 
 ### 1.1 Better calibration  — ✓ CODE DONE (2026-06-10)
-> **Status:** Code complete — `SAMPLES_PER_STEP` 40 → 200, `SEARCH_ITERS` 12 → 14 in **both** `AntennaCalibration.ino` copies (`sketches/` active + `libraries/UwbRtls/examples/` reference); also widened the sample count + loop counter to `uint16_t` so higher counts can't wrap. **Pending on hardware:** run the calibration, validate at two distances (≈1.5 m and ≈5 m, agree within ±2 cm).
+> **HW pending:** run calibration, validate at two distances (agree within ±2 cm).
 
-**What:** Change `SAMPLES_PER_STEP` 40 → 200, `SEARCH_ITERS` 12 → 14 in `AntennaCalibration.ino`.  
-**Why:** 40 samples gives ±1 cm statistical uncertainty on the mean → ±3 delay units systematic error. 200 samples reduces to ±0.3 cm.  
-**Validation:** After convergence, run loop() for 60 s and record mean ± std. Validate at two distances (e.g. 1.5 m and 5 m); both should agree within ±2 cm.  
-**Removes:** ±1–3 cm systematic calibration bias per board.  
+### 1.1a Multi-distance calibration mode (AntennaCalibration extension)
+**What:** Run binary search at 3 known distances (e.g. 2 m, 4 m, 7 m); sketch prompts between positions; final delay = average of three converged values.
+**Why:** Washes out location-specific multipath at the calibration spot.
 **Complexity:** Easy
 
-### 1.2 Adaptive polling + age-gated anchor eviction
+### 1.1b Cross-calibration (Python or MATLAB: all anchor boards at once)
+**What:** Place all 4 anchors at a measured test fixture. Use survey data. Solve: `measured(A,B) = true(A,B) + bias_A + bias_B`. Pin board 0x01 as reference (bias=0), least-squares solve 3 unknowns from 6 pairs. Convert metres → ticks (1 tick ≈ 4.69 mm).
+**Note:** The large per-anchor biases (~400–700 mm) seen in Tier-1 calibration are dominated by height offset (anchors at 2 m, tag at floor, 2D model). Do this after fixing the height problem (either physically or by moving to 3D mode).
+**Complexity:** Easy (Python only, no reflash)
 
-> **Status:** ✓ CODE DONE (2026-06-11) — `UwbScheduler` now tracks per-anchor `_failStreak`/`_skipSweeps`/`_backoffMult`; 3 consecutive fails → skip 5 sweeps, doubling each subsequent backoff (5→10→20→40, capped). Serial prints `[SCHED]` on skip and on recovery. MATLAB side was already done. No hardware reflash required (library change).
+### 1.2 Adaptive polling — ✓ CODE DONE (2026-06-11)
 
-**Firmware (remaining):** Add `failCount[N]` per anchor in `UwbScheduler`; after 3 consecutive fails, skip for 5 sweeps then retry with exponential backoff.  
-**MATLAB:** ✓ Done — `anchorLastSeen` + `AGE_GATE_SEC = 3.0` clears stale range history automatically.  
-**Removes:** 100 ms wasted per dead anchor per sweep; prevents stale ranges poisoning the solver.  
-**Complexity:** Easy
+### 1.3A Faster sweep rate — ✓ CODE DONE (2026-06-11)
+`UWB_REPLY_DELAY_US` 5000 µs. **HW pending:** reflash + confirm no increase in failures.
 
-### 1.3 Faster sweep rate
+### 1.3B 6.8 Mbps fast mode — **CONFIRMED FAILED (2026-06-17)**
+All 4 boards produced garbage frames with `MODE_SHORTDATA_FAST_ACCURACY`. Reverted to 110 kbps. Root cause unknown. Not to be retried without diagnosis.
 
-> **Status (Option A):** ✓ CODE DONE (2026-06-11) — `UWB_REPLY_DELAY_US` 6000 → 5000 µs in `UwbConfig.h`. Saves 2 ms per exchange / 8 ms per sweep (4 anchors). Estimated sweep rate: 8 Hz → ~10 Hz. Requires reflash of all boards. Validate by checking Serial Monitor for exchange failures; if drops increase, revert to 6000 µs.
-
-**Option A:** ✓ Done — Reduced `UWB_REPLY_DELAY_US` 6000 → 5000 µs (was 7000 µs before Phase 1.0). Minimum safe value for 110 kbps / 64 MHz PRF mode is ~3500 µs; 5000 µs leaves ~1.5 ms margin above ESP32 SPI + DW1000 processing time.
-
-> 🔴 **Option B — PENDING:** Switch to `MODE_SHORTDATA_FAST_LOWPOWER` (6.8 Mbps, 64-symbol preamble, reply delay ~1500 µs). Estimated sweep rate: ~35–45 Hz for 4 anchors. Trades 64 MHz PRF accuracy for speed — increases multipath sensitivity in small rooms. Defer until Phase 2.1 NLOS detection is in place to compensate. Only needed if >15 Hz is required for the application.
-
-**Effect:** Higher sweep rate directly improves every filter layer downstream.  
-**Complexity:** Option A: Easy | Option B: Medium (needs mode switch + recalibration)
-
-### 1.4 Multipath bias correction (MATLAB slider) ✓ Done
-Global `RANGE_BIAS_M` subtracted from all filtered ranges before multilaterator. Tunable 0–0.10 m via slider. Tune by placing tag at a known point and minimising `info.rms`.
-
-### 1.5 Anchor self-survey (auto-localization)
-
-> **Status:** ✓ CODE DONE (2026-06-11) — No extra sketch or reflash needed. The tag firmware now accepts a `SURVEY\n` serial command; it loops over all anchor pairs and sends `MSG_SURVEY_REQ` to each anchor, which temporarily calls `rangeTo()` to the target anchor and replies with `MSG_SURVEY_RESP`. 100 samples averaged per pair. `matlab/runSurvey.m` collects results, runs classical MDS, fixes the coordinate frame, and writes `anchors.json` in the format expected by `AnchorConfig.fromJson()`. Run `run_localization.m` immediately after — no reflash of any board needed.
-
-**What:** Anchors range to each other; MATLAB computes their layout via MDS; `anchors.json` is written automatically. No tape measure required.  
-**Protocol:** Tag sends `MSG_SURVEY_REQ(target=B)` to Anchor A → Anchor A calls `rangeTo(B)` → Anchor A sends `MSG_SURVEY_RESP(src=A, dst=B, dist, rxp)` → Tag outputs `SURVEY,v1,<src>,<dst>,<avg_dist_mm>,<ok>` line.  
-**MATLAB:** `matlab/runSurvey.m`. Collects N×(N-1)/2 pairs (100 samples each, ~4 s/pair). Classical MDS. Frame fixed (anchor 1 origin, anchor 2 on +X, anchor 3 in +Y half-plane). Writes `anchors.json`.  
-**Accuracy:** ~1–2 cm anchor position accuracy after 100-sample averaging.  
-**Limitation:** 3D self-survey requires meaningful height variation across anchors. All-same-height gives degenerate Z axis.  
-**Complexity:** Medium (firmware protocol + MATLAB MDS)
+### 1.5 Anchor self-survey — ✓ CODE DONE (2026-06-11); Python host done
 
 ---
 
 ## Phase 2 — Ranging Quality
 
-*Firmware changes + MATLAB. Attacks measurement errors at their source.*
+### 2.1 FP_POWER NLOS detection — ✓ FIRMWARE DONE (2026-06-29); ✓ PYTHON DONE
+- Firmware: `TwrEngine` reads `getFirstPathPower()`/`getReceiveQuality()` after each rangeTo(). v3 wire format: `fp_dbm` + `quality` per anchor. **HW: reflash all boards to activate.**
+- Python: `fusion_ekf.py` uses `nlos_factor = 1 + mean(max(0, (rx_dbm−fp_dbm)/6))` to inflate R.
 
-### 2.1 FP_POWER NLOS detection in firmware ← unique advantage
-**What:** Read first-path amplitude registers (FP_AMPL1/2/3, RXPACC) from DW1000 after each receive. Compute NLOS score per Decawave APS006. Send in RANGE_REPORT payload. Parse in MATLAB.  
-**Math:**
-```
-FP_power_dBm = 10·log10((A1² + A2² + A3²) / RXPACC²) − 115.72
-NLOS_score = RX_power_dBm − FP_power_dBm
-```
-`< 3 dB` → LOS. `3–6 dB` → soft NLOS. `> 6 dB` → hard NLOS.  
-**Why it matters:** Detects NLOS before the solver runs, based on physics — not just large residuals after the fact. Works even when consistent NLOS bias looks "normal" to MAD gating.  
-**Complexity:** Medium
-
-### 2.2 Weighted multilateration
-**What:** Derive weights from NLOS score: `σᵢ = σ_base × 10^(nlos_i/20)`, `wᵢ = 1/σᵢ²`. Modify LM in Multilaterator.m to use weighted residuals and Jacobian.  
-**Effect:** A 10 dB NLOS anchor gets 1/100 the influence of a clean LOS anchor.  
-**Complexity:** Medium
+### 2.2 Weighted multilateration — ✓ PYTHON DONE (implicit via adaptive R in FusionEKF)
+True weighted LM (direct range residual weighting in multilaterator) is still pending for non-EKF paths.
 
 ### 2.3 NLOS range bias correction
-**What:** Physical bias correction per anchor: `d_corrected = d_measured − k_nlos × max(0, nlos_score − 3.0)`. Tunable slider K_NLOS (0–0.06 m/dB).  
-**Removes:** Systematic positive through-wall ranging bias (~20–50 cm per wall).  
-**Complexity:** Easy (once 2.1 done)
+**What:** `d_corrected = d_measured − k_nlos × max(0, nlos_score − 3.0)`. Tunable slider.
+**Removes:** Systematic positive through-wall ranging bias (~20–50 cm per wall).
+**Complexity:** Easy (once 2.1 active on hardware)
 
 ### 2.4 Per-anchor diagnostics panel
-**What:** Second axes in LivePlotter showing per-anchor range residual (bar chart) and NLOS score (colour-coded) updated every sweep.  
-**Gives:** Immediate visual feedback on which anchor is causing problems.  
-**Complexity:** Easy
+**What:** Per-anchor range residual bar chart + NLOS score colour coding updated each sweep.
+**Complexity:** Easy (Python only)
 
-### 2.5 GPS-style δ-solve in Multilaterator (4+ anchors required)
-**What:** Augment state to [x, y, δ] where δ is a common range bias: `ρᵢ = ‖pos − aᵢ‖ + δ`. Jacobian row i: `[unit_vec_i, 1]`.  
-**Effect:** δ absorbs tag delay miscalibration + average multipath bias. Solved δ is a real-time calibration health metric.  
-**Warning:** With 3 anchors this is equivalent to TDOA geometry — poorly conditioned near centroid. Only enable with 4+ anchors.  
-**Requires:** Phase 4.1  
+### 2.5 GPS-style δ-solve (4+ anchors)
+**What:** Add common range bias δ to multilateration: `ρᵢ = ‖pos − aᵢ‖ + δ`. Absorbs tag delay miscalibration + average multipath bias.
+**Warning:** Only enable with 4+ anchors (degenerate with 3).
 **Complexity:** Medium
 
 ---
 
 ## Phase 3 — State Estimation
+*Deprioritised — Python FusionEKF (Phase 4.4) already covers the motion-model gap better than a pure-UWB CA/EKF. Revisit if IMU-fused accuracy is still insufficient.*
 
-### 3.1 Constant-acceleration EKF (CV → CA model)
-**What:** Upgrade from `[x, y, vx, vy]` to `[x, y, vx, vy, ax, ay]`. Dynamics: `x ← x + vx·dt + ½ax·dt²`, `ax ← ax + w_ax` (random jerk).  
-**Effect:** Tracks direction changes and acceleration phases better. Reduces lag on turns.  
-**Complexity:** Medium
-
-### 3.2 δ as an EKF state (bias estimation — works with 3 anchors)
-**What:** Add δ to EKF state: `[x, y, vx, vy, δ]`. δ evolves as random walk. Tight coupling: raw ranges feed directly into EKF. Measurement: `hᵢ(state) = ‖pos − aᵢ‖ + δ`. Jacobian row i: `[unit_vec_i, 0, 0, 1]`.  
-**Advantage over multilaterator δ-solve:** Works with 3 anchors; temporally smoothed; no ill-conditioning.  
-**Complexity:** Medium–Hard
-
-### 3.3 Moving Horizon Estimator (MHE)
-**What:** Constrained optimisation over sliding window of N past sweeps.
-
-Objective:
-```
-min  ‖x_{k−N} − x̄_{k−N}‖²_{P⁻¹}         (arrival cost)
-   + Σ_t ‖x_t − F·x_{t−1}‖²_{Q⁻¹}        (dynamics)
-   + Σ_t Σ_i ρ(‖pos_t − aᵢ‖ − dᵢ_t)     (ranges, Huber loss)
-
-subject to: x_min ≤ pos_t ≤ x_max         (room bounds, hard)
-            ‖vel_t‖ ≤ v_max               (speed limit, hard)
-```
-
-Huber loss with δ=0.15 m:
-```
-ρ(e) = e²/2                   if |e| ≤ 0.15
-       0.15·(|e| − 0.075)     if |e| > 0.15
-```
-
-**Advantages over EKF:** NLOS absorbed by Huber loss; room boundary prevents wild jumps; physically impossible positions excluded.  
-**Computation:** fmincon with N=6, dim=4 → 2–5 ms per solve (well within 333 ms sweep period).  
+### 3.1 Constant-acceleration EKF (CV → CA model) — deferred
+### 3.2 δ as EKF state — deferred
+### 3.3 MHE (sliding window, Huber loss, room constraints) — future
+**What:** Constrained optimisation over N past sweeps. Huber loss on ranges. Room bounds + speed limit as hard constraints.
 **Complexity:** Hard
-
-### 3.4 Hybrid EKF + MHE
-**What:** EKF every sweep (real-time, zero lag). MHE every K=5 sweeps (accuracy). If they diverge >threshold → flag uncertainty.  
-**Complexity:** Medium (once 3.3 done)
 
 ---
 
-## Phase 4 — 3D + Orientation (XYZ + RPY)
+## Phase 4 — 3D + Orientation
 
-### 4.1 4th anchor + 3D configuration
-**What:** Flash board 4 as anchor (ANCHOR_ID=0x04). Mount at different height. Update anchors.json: `"dim": 3`. Add `0x04` to `ANCHORS[]` in Tag.ino.  
-**Effect:** Enables Z-coordinate estimation and δ-solve (Phase 2.5).  
-**Complexity:** Easy (config only)
+### 4.1 4th anchor — ✓ DONE (config only)
+All 4 anchors in ANCHORS[]. Keep `"dim": 2` for 2D rover; switch to `"dim": 3` when anchors are at different heights.
 
-### 4.2 BNO085 IMU — firmware implementation
-**What:** Implement `SensorImu::begin()` and `SensorImu::read()` using Adafruit BNO08x SPI library.  
-**Why SPI:** I2C bus is taken by OLED; BNO085 has known clock-stretching issues on ESP32 I2C.  
-**Reports:** ARVR Stabilised Rotation Vector at 10 ms (quaternion, 100 Hz) + Linear Acceleration at 10 ms (gravity-removed, 100 Hz).  
-**Note:** HostLink IMU tail already wired. FrameParser.m already parses it.  
-**Complexity:** Medium
+### 4.2 BNO085 IMU — ✓ CODE DONE (TagWrover.ino, 2026-06-18)
+Wire1 (GPIO 25/26), I2C 0x4A, Adafruit BNO08x library. Reports at 100 Hz. WiFi reinit workaround included.
+**HW: verified working on Wrover board.**
 
-### 4.3 RPY output from quaternion
-```
-roll  = atan2(2(qw·qx + qy·qz),  1 − 2(qx² + qy²))
-pitch = asin(2(qw·qy − qz·qx))
-yaw   = atan2(2(qw·qz + qx·qy),  1 − 2(qy² + qz²))
-```
-BNO085 magnetometer corrects yaw drift. Log RPY alongside XYZ. Add RPY readout to HUD.  
-**Complexity:** Easy (once 4.2 done)
+### 4.3 RPY from quaternion — ✓ CODE DONE (TagWrover.ino)
+Full `quatToRPY()`, OLED display, serial 200 ms. Pitch/roll range correction: `d_horiz ≈ d_meas × cos(pitch) × cos(roll)` — pending integration into Python host.
 
-### 4.4 Loose coupling — IMU-aided EKF
-**What:** IMU predict at 100 Hz (fills 333 ms gaps between UWB sweeps). UWB measurement update at 3 Hz.  
-**State:** `[x, y, z, vx, vy, vz, qw, qx, qy, qz, δ]` (11-state).  
-**Effect:** Continuous smooth XYZ output between UWB sweeps. Effectively decouples position accuracy (UWB) from position smoothness (IMU).  
-**Complexity:** Hard
+### 4.4 Loose coupling — IMU-aided EKF — ✓ PYTHON DONE (FusionEKF)
+6D state `[px, py, vx, vy, bx, by]` with accelerometer bias. IMU-driven prediction at packet rate. ZUPT injection. NIS gate. Adaptive R. **Pitch/roll range correction from 4.3 not yet wired into FusionEKF.**
 
-### 4.5 Tight coupling — raw ranges + IMU in one filter
-**State:** `[x, y, z, vx, vy, vz, qw, qx, qy, qz, δ]`  
-**Dynamics:** IMU-driven at 100 Hz (quaternion integration + linear acceleration)  
-**Measurement:** Raw UWB ranges (not multilaterated position)  
-**Solver:** MHE with Huber loss + room bounds + speed limit + quaternion unit-norm constraint  
-**Output:** XYZ + RPY + velocity + bias estimate  
-**This is the architecture commercial systems use on dedicated hardware.**  
+### 4.5 Tight coupling — raw ranges + IMU in MHE
+**State:** `[x, y, z, vx, vy, vz, qw, qx, qy, qz, δ]`. IMU-driven dynamics + raw UWB ranges as measurements. Room bounds + unit quaternion constraint.
 **Complexity:** Very Hard
 
 ---
 
 ## Phase 5 — System Hardening
 
-### 5.1 Deep sleep on anchors (from dw1000-ng)
-DW1000 deep sleep for 80% of the sweep period between exchanges. Power: ~100 mA continuous → ~20 mA average.  
+### 5.1 Deep sleep on anchors
+DW1000 deep sleep between exchanges: ~100 mA → ~20 mA average.
 **Complexity:** Medium
 
-### 5.2 DW1000 driver error handling
-40+ `// TODO proper error/warning handling` in the vendored driver. Add recovery for SPI lockup, PLL failure, LDE timeout. Auto-reset if radio goes silent for >500 ms.  
+### 5.2 DW1000 driver error handling — partial (watchdog done; CRC re-arm done 2026-06-29)
+40+ `// TODO` in vendored driver. CRC/LDE re-arm now works (onReceiveFailed handler). Full recovery for SPI lockup, PLL failure, LDE timeout still needed.
 **Complexity:** Medium
 
 ### 5.3 Temperature compensation
-DW1000 on-chip temperature sensor (OTP-calibrated) already read but never applied. Drift ~0.1 ticks/°C → ~0.5 mm/°C per board. Apply linear correction relative to calibration temperature.  
+DW1000 on-chip temperature sensor already read but never applied. Drift ~0.1 ticks/°C → ~0.5 mm/°C per board.
 **Complexity:** Medium
 
 ### 5.4 Online self-calibration
-Batch optimisation (offline): jointly solve for anchor positions and delays using accumulated tag trajectory + range data. Requires spatial diversity.  
+Batch optimisation over accumulated tag trajectory + range data. Requires spatial diversity.
 **Complexity:** Hard
 
 ---
 
 ## Phase 6 — Scale and Future
 
-### 6.1 Multi-tag TDMA superframe
-Time-slotted TDMA. Master anchor broadcasts slot assignments via ANNOUNCE frames (already defined in UwbFrame.h). MATLAB maintains separate EKF/MHE per tagId.  
+### 6.1 Multi-tag TDMA superframe — Python already multi-tag capable
+Python `run_localization.py` uses `dict[int, TagState]` auto-discovery (independent EKF/ZUPT/IMU per tag). Firmware side: ANNOUNCE/SLOT_GRANT frames defined in UwbFrame.h but not yet implemented.
+**Complexity:** Hard (firmware side)
+
+### 6.2 Differential timestamp encoding (pizzo00)
+12-byte/device vs 17-byte encoding → 6 anchors per RANGE frame. For future fast multi-anchor mode.
 **Complexity:** Hard
 
-### 6.2 Differential timestamp encoding (pizzo00 technique)
-Broadcast POLL with 12-byte/device encoding (vs 17-byte absolute timestamps). 6 anchors per frame. For future fast multi-anchor mode.  
-**Complexity:** Hard
-
-### 6.3 On-device 2D solve (jremington technique)
-Precompute (AᵀA)⁻¹ once at startup (anchors fixed). Position update = matrix-vector multiply. Display on OLED without MATLAB.  
+### 6.3 On-device 2D solve (OLED display)
+Precompute (AᵀA)⁻¹ at startup. Display position on OLED without host.
 **Complexity:** Medium
 
 ---
@@ -292,70 +236,88 @@ Precompute (AᵀA)⁻¹ once at startup (anchors fixed). Position update = matri
 
 ```
 Phase 0 — Already Done
-  ✓  MATLAB watchdog + UDP auto-reconnect
-  ✓  EKF divergence guard + auto-reset
-  ✓  Age-gated anchor eviction (MATLAB)
-  ✓  RANGE_BIAS_M tuning slider
-  ✓  Inner try-catch (bad sweeps skip, session survives)
-  ✓  Status label in tuning panel
+  ✓  Python FusionEKF (IMU-driven, ZUPT, NIS, adaptive R)
+  ✓  Python calibration infrastructure (Tier-1 + multipoint survey)
+  ✓  Python multi-tag auto-discovery (dict[tagId] → independent EKF per tag)
+  ✓  MATLAB robustness (watchdog, divergence guard, etc.) [MATLAB now SHELVED]
 
 Phase 1 — Foundation
-  1.0  Switch to 64 MHz PRF (MODE_LONGDATA_RANGE_ACCURACY)    Easy   ✓ code done (HW: reflash+recal)
-  1.1  Better calibration (200 samples, multi-distance)        Easy   ✓ code done (HW: run+validate)
-  1.2  Adaptive polling — skip dead anchors (firmware)         Easy   ✓ code done
-  1.3  Faster sweep rate — Option A done (5000 µs); 🔴 Option B (6.8 Mbps) pending
-  1.5  Anchor self-survey + auto anchors.json                  Medium ✓ code done
+  1.0   64 MHz PRF accuracy mode                                Easy     ✓ code done (HW: reflash+recal)
+  1.1   Better calibration (200 samples, 14 iters)              Easy     ✓ code done (HW: run+validate)
+  1.1a  Multi-distance calibration (3 positions, averaged)      Easy     pending
+  1.1b  Cross-calibration Python (all boards at once)           Easy     pending (height offset dominates — fix 3D first)
+  1.2   Adaptive polling — skip dead anchors                    Easy     ✓ code done
+  1.3A  Faster sweep rate (5000 µs reply delay)                 Easy     ✓ code done (HW: reflash+validate)
+  1.3B  6.8 Mbps fast mode                                      -        CONFIRMED FAILED — do not retry without diagnosis
+  1.5   Anchor self-survey + auto anchors.json                  Medium   ✓ code done (Python host done)
 
 Phase 2 — Ranging Quality
-  2.1  FP_POWER NLOS detection (firmware + wire format)        Medium
-  2.2  Weighted multilateration (NLOS score → weights)         Medium
-  2.3  NLOS range bias correction slider                       Easy
-  2.4  Per-anchor diagnostics panel in LivePlotter             Easy
-  2.5  GPS-style δ-solve in Multilaterator (4+ anchors)       Medium
+  2.1  FP_POWER NLOS detection (firmware v3 + Python adaptive R) Medium  ✓ code done (HW: reflash to activate fp_dbm)
+  2.2  Weighted multilateration                                  Medium  ✓ Python done (implicit via adaptive R)
+  2.3  NLOS range bias correction slider                         Easy    pending
+  2.4  Per-anchor diagnostics panel                              Easy    pending (Python)
+  2.5  GPS-style δ-solve (4+ anchors)                           Medium  pending
 
-Phase 3 — State Estimation
-  3.1  Constant-acceleration EKF (CV → CA model)              Medium
-  3.2  δ as EKF state (bias estimation, 3 anchors OK)         Medium-Hard
-  3.3  MHE (sliding window, Huber loss, room constraints)      Hard
-  3.4  Hybrid EKF + MHE                                       Medium
+Phase 3 — State Estimation [DEPRIORITISED]
+  3.1  CA-EKF (CV → CA model)                                   Medium  deferred
+  3.2  δ as EKF state                                           Medium-Hard  deferred
+  3.3  MHE (sliding window, Huber, room constraints)             Hard    future
+  3.4  Hybrid EKF + MHE                                         Medium  future
 
 Phase 4 — 3D + RPY
-  4.1  4th anchor + 3D anchors.json                           Easy
-  4.2  BNO085 SensorImu implementation (SPI)                  Medium
-  4.3  RPY output from quaternion                             Easy
-  4.4  Loose coupling — IMU-aided EKF (100 Hz predict)        Hard
-  4.5  Tight coupling — raw ranges + IMU in MHE               Very Hard
+  4.1  4th anchor + anchors.json update                          Easy    ✓ done
+  4.2  BNO085 SensorImu (TagWrover, Wire1, 100 Hz)              Medium  ✓ code done (HW: verified)
+  4.3  RPY from quaternion (TagWrover OLED + serial)             Easy    ✓ code done
+  4.4  Loose coupling — IMU-aided EKF                           Medium  ✓ Python done (FusionEKF)
+       Remaining: wire pitch/roll correction from 4.3 into FusionEKF range pre-processing
+  4.5  Tight coupling — raw ranges + IMU in MHE                 Very Hard  future
 
 Phase 5 — System Hardening
-  5.1  Deep sleep on anchors                                  Medium
-  5.2  DW1000 driver error handling                          Medium
-  5.3  Temperature compensation                              Medium
-  5.4  Online self-calibration                               Hard
+  5.1  Deep sleep on anchors                                    Medium  pending
+  5.2  DW1000 driver error handling (CRC re-arm done)           Medium  partial
+  5.3  Temperature compensation                                  Medium  pending
+  5.4  Online self-calibration                                   Hard    future
 
 Phase 6 — Scale
-  6.1  Multi-tag TDMA superframe                             Hard
-  6.2  Differential timestamp encoding                       Hard
-  6.3  On-device 2D solve (OLED display)                    Medium
+  6.1  Multi-tag TDMA superframe (Python done; firmware pending) Hard    firmware pending
+  6.2  Differential timestamp encoding                           Hard    future
+  6.3  On-device 2D solve (OLED)                                Medium  future
 ```
 
 ---
 
 ## Expected Accuracy at Each Phase
 
-| After phase | XY accuracy | Z accuracy | RPY | Notes |
+| State | XY accuracy | Z accuracy | RPY | Notes |
 |---|---|---|---|---|
-| Current | 3–10 cm | — | — | Calibration noise + NLOS + CV EKF |
-| Phase 1 | 2–6 cm | — | — | Calibration bias removed, multipath floor corrected |
-| Phase 2 | 1–4 cm | — | — | NLOS weighted/rejected before solver |
-| Phase 3 | 1–3 cm | — | — | Better filter model, MHE room constraints |
-| Phase 4 | 1–3 cm | 2–5 cm | ~3–5° | IMU fills gaps, 3D anchors |
-| Phase 5 | Same | Same | Same | Better reliability, power, robustness |
+| Current (pre-reflash) | 3–10 cm | — | ✓ tag only | Calibration noise + CRC-wedge bug active |
+| After reflash (Phase 1+2.1) | 2–6 cm | — | ✓ | fp_dbm active, wedge bug fixed |
+| After calibration (1.1a+1.1b) | 1–4 cm | — | ✓ | Delay biases corrected |
+| After NLOS weighting (2.2+2.3) | 1–3 cm | — | ✓ | NLOS ranges down-weighted |
+| 3D anchors (varied heights) | 1–3 cm | 2–5 cm | ✓ | Z coordinate unlocked |
 
 ---
 
-## Recommended Starting Sequence
+## Immediate Next Actions
 
 ```
-1.0 → 1.1 → 1.2 → 1.5 → 1.3 → 2.1 → 2.2 → 2.4 → 3.1 → 4.1 → 4.2 → 4.3 → 4.4
-PRF   cal   poll  surv  rate  NLOS  wgt  plot   CA   4th   IMU   RPY   fuse
+Priority 1 — reflash (all boards, same firmware):
+  reflash Anchor × 4 with: 1.0 (64 MHz PRF) + 1.3A (5000 µs) + 5.2 (CRC re-arm fix)
+  reflash TagWrover with:   same + v3 wire format (fp_dbm active)
+  then: run AntennaCalibration on each board (1.1 — 200 samples, 14 iters)
+
+Priority 2 — validate ranging:
+  run_localization.py → confirm all 4 anchors stable
+  check Serial for [TWR]/[SCHED]/[WIFI] prints — should see no wedge resets
+  verify v3 packets in Python log (fp_dbm values appear)
+
+Priority 3 — calibration:
+  1.1a: multi-distance calibration per board (3 distances)
+  collect_calibration_data.py at known position → update calibration.json
+
+Priority 4 — next code items:
+  2.3: NLOS range bias correction slider (Easy)
+  2.4: per-anchor diagnostics panel (Easy)
+  4.4: wire pitch/roll tilt correction into FusionEKF range pre-processing (Medium)
+  1.3B: diagnose garbage-frame root cause (Medium — scope session?)
 ```

@@ -25,6 +25,8 @@ uint8_t UwbScheduler::sweep() {
       _results[i].valid    = false;
       _results[i].distance = 0.0f;
       _results[i].rxPower  = 0.0f;
+      _results[i].fpPower  = 0.0f;
+      _results[i].quality  = 0.0f;
       continue;
     }
 
@@ -33,6 +35,8 @@ uint8_t UwbScheduler::sweep() {
     _results[i].valid    = ok;
     _results[i].distance = ok ? dist : 0.0f;
     _results[i].rxPower  = ok ? rxp  : 0.0f;
+    _results[i].fpPower  = ok ? _engine->fpPower() : 0.0f;
+    _results[i].quality  = ok ? _engine->quality()  : 0.0f;
 
     if (ok) {
       if (_failStreak[i] > 0) {

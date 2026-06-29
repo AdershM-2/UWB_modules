@@ -52,6 +52,11 @@ public:
   float   lastDistance() const { return _lastDistance; }
   uint8_t lastPeer()     const { return _lastPeer; }
 
+  // First-path power and receive quality from the last successful rangeTo().
+  // Read these immediately after rangeTo() returns true; they are overwritten on the next call.
+  float fpPower() const { return _fpPower; }
+  float quality() const { return _quality; }
+
   // Print the chip's device identifier to Serial (bring-up / SPI sanity check).
   void printDeviceId();
 
@@ -78,6 +83,9 @@ private:
   float   _lastDistance = 0.0f;
   uint8_t _lastPeer     = UWB_ADDR_INVALID;
 
+  float   _fpPower  = 0.0f;    // first-path power from last rangeTo() (tag RX side)
+  float   _quality  = 0.0f;    // receive quality from last rangeTo()
+
   // TAG watchdog: consecutive failures → full radio reset.
   static constexpr uint8_t FAIL_STREAK_RESET = 5;
   uint8_t _failStreak = 0;
@@ -94,6 +102,12 @@ private:
   static volatile bool _receivedFlag;
   static void onSent();
   static void onReceived();
+  // No-op handlers that exist solely so the DW1000 driver executes its
+  // clearReceiveStatus() + newReceive() + startReceive() re-arm sequence
+  // on every receive failure. Without these the driver silently skips the
+  // re-arm block, leaving the receiver wedged after a CRC/LDE error.
+  static void onReceiveFailed()  {}
+  static void onReceiveTimeout() {}
 };
 
 #endif // UWBRTLS_TWRENGINE_H

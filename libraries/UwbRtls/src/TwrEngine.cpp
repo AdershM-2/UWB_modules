@@ -21,6 +21,8 @@ void TwrEngine::begin(TwrRole role, uint8_t myAddr, uint16_t antennaDelay) {
 
   DW1000.attachSentHandler(TwrEngine::onSent);
   DW1000.attachReceivedHandler(TwrEngine::onReceived);
+  DW1000.attachReceiveFailedHandler(TwrEngine::onReceiveFailed);
+  DW1000.attachReceiveTimeoutHandler(TwrEngine::onReceiveTimeout);
 
   startRx();
 }
@@ -109,6 +111,10 @@ bool TwrEngine::rangeTo(uint8_t anchorAddr, float& distanceMeters, float& rxPowe
   readFrame();
   if (frameType(_rx) != MSG_POLL_ACK || frameSrc(_rx) != anchorAddr ||
       !frameIsForUs(_rx, _myAddr)) {
+    if (frameType(_rx) == MSG_POLL_ACK && frameSrc(_rx) != anchorAddr)
+      Serial.printf("[TWR] stray POLL_ACK from 0x%02X while polling 0x%02X"
+                    " — check for duplicate anchor IDs\n",
+                    frameSrc(_rx), anchorAddr);
     startRx(); _failStreak++; return false;
   }
   DW1000.getReceiveTimestamp(_timePollAckReceived);
@@ -132,6 +138,8 @@ bool TwrEngine::rangeTo(uint8_t anchorAddr, float& distanceMeters, float& rxPowe
     startRx(); _failStreak++; return false;
   }
   unpackReportPayload(_rx, distanceMeters, rxPowerDbm);
+  _fpPower = DW1000.getFirstPathPower();   // must read before startRx() clears RX state
+  _quality = DW1000.getReceiveQuality();
   _failStreak = 0;
   startRx();
   return true;
